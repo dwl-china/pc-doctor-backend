@@ -1,5 +1,8 @@
 package com.pcdoctor.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.MybatisMapperBuilderAssistant;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.pcdoctor.exception.BizException;
 import com.pcdoctor.common.ErrorCode;
 import com.pcdoctor.dto.AppointmentSubmitRequest;
@@ -48,6 +51,9 @@ class AppointmentServiceTest {
     @BeforeEach
     void setUp() {
         service = new AppointmentService(appointmentMapper, userMapper, categoryMapper, fileService);
+        // 纯 Mockito 环境无 Spring 上下文，MyBatis-Plus 的 Lambda 包装器依赖 TableInfo 缓存，
+        // 需显式预热（否则 CI 上测试类执行顺序不同会抛 "can not find lambda cache"）
+        TableInfoHelper.initTableInfo(new MybatisMapperBuilderAssistant(new MybatisConfiguration(), ""), Appointment.class);
         queued = appointment(1L, "u1", Appointment.STATUS_QUEUED, null);
         processing = appointment(2L, "u1", Appointment.STATUS_PROCESSING, "doc1");
         done = appointment(3L, "u1", Appointment.STATUS_DONE, "doc1");
