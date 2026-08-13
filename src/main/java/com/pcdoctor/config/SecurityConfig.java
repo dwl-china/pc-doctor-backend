@@ -54,6 +54,10 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/api/auth/register").permitAll()
+                        // 契约 §5 权限矩阵中的公开读接口
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/appointments/**", "/api/documents/**", "/api/activities/**",
+                                "/api/categories", "/api/doctors", "/api/config/**", "/api/files/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex

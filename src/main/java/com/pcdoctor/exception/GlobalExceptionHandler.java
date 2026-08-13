@@ -20,11 +20,18 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    /** 业务异常 */
+    /** 业务异常：UNAUTHORIZED→HTTP 401、FORBIDDEN→HTTP 403，其余 HTTP 200 + 业务码（契约 §1） */
     @ExceptionHandler(BizException.class)
-    public Result<Void> handleBizException(BizException e) {
+    public org.springframework.http.ResponseEntity<Result<Void>> handleBizException(BizException e) {
         log.warn("业务异常: code={}, message={}", e.getErrorCode().getCode(), e.getMessage());
-        return Result.fail(e.getErrorCode().getCode(), e.getMessage());
+        int status = switch (e.getErrorCode()) {
+            case UNAUTHORIZED -> HttpStatus.UNAUTHORIZED.value();
+            case FORBIDDEN -> HttpStatus.FORBIDDEN.value();
+            default -> HttpStatus.OK.value();
+        };
+        return org.springframework.http.ResponseEntity
+                .status(status)
+                .body(Result.fail(e.getErrorCode().getCode(), e.getMessage()));
     }
 
     /** @Valid 参数校验失败，取第一条错误信息 */

@@ -100,7 +100,7 @@
 |---|---|---|---|
 | GET | `/api/appointments` | 公开 | 预约列表，query: `page,size,status,user_id,mine=1`（mine 需登录）；公开查询返回脱敏字段（不含联系方式） |
 | GET | `/api/appointments/{id}` | 公开 | 预约详情（含发单用户与电医信息、消息列表） |
-| POST | `/api/appointments` | 登录 | 提交预约，body: `{"problem_description","problem_category","available_time","appointment_location","problem_pictures":["url1"]}` |
+| POST | `/api/appointments` | 登录 | 提交预约，body: `{"problem_description","category_id","problem_picture","available_time","appointment_location"}` |
 | PUT | `/api/appointments/{id}` | 登录 | 更新预约。本人可改自己未接单的预约；电医仅可改自己接的单 |
 | DELETE | `/api/appointments/{id}` | 登录 | 撤销/删除。本人（未接单）或管理员 |
 | POST | `/api/appointments/{id}/accept` | 电医 | 接单：status 0→1，写 appointment_time、doctor_id |
@@ -114,8 +114,9 @@
   "userId": "mdd3135",
   "userName": "Mao",
   "problemDescription": "电脑无法开机",
-  "problemCategory": "硬件问题",
-  "problemPictures": ["/api/files/appointment/xxx.jpg"],
+  "categoryId": 1,
+  "categoryName": "系统问题",
+  "problemPicture": "/api/files/appointment/xxx.jpg",
   "availableTime": "周三下午",
   "appointmentLocation": "信息楼一楼大厅",
   "status": 0,

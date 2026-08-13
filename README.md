@@ -62,7 +62,9 @@ src/main/java/com/pcdoctor/
 ├── common/      # Result<T> 统一返回体、ErrorCode 业务错误码
 ├── config/      # CORS、MyBatis-Plus 等配置
 ├── exception/   # BizException + @RestControllerAdvice 全局异常处理
-├── controller/ service/ mapper/ entity/ dto/   # 业务分层，随阶段 3-4 落地
+├── controller/ service/ mapper/ entity/ dto/   # 业务分层（用户/预约/留言/文档/活动/分类/配置/文件）
+├── security/   # JwtUtil + JwtAuthenticationFilter
+└── db/migration/   # Flyway 迁移（V3 管理员种子为 Java 迁移）
 src/main/resources/
 ├── application.yml / application-dev.yml / application-prod.yml
 └── db/migration/   # Flyway 迁移脚本
@@ -75,7 +77,7 @@ src/main/resources/
 
 ## 开发状态
 
-进行中。当前为阶段 1 交付的脚手架（统一返回体 / 错误码 / 异常处理 / 多环境配置 / API 契约），业务接口尚未实现。阶段 2 起将落地 Flyway 建表与认证授权。
+阶段 0-4 已完成（2026-08-13）：Flyway 建表与种子数据、Security + JWT 认证授权、全部业务模块接口（用户/预约/留言/文档/活动/分类/配置/文件）。剩余：阶段 5 测试 + CI、阶段 6-7 前端、阶段 8 联调部署。
 
 ## 安全约定
 
