@@ -1,5 +1,7 @@
 # PC-Doctor Backend
 
+[![CI](https://github.com/dwl-china/pc-doctor-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/dwl-china/pc-doctor-backend/actions/workflows/ci.yml)
+
 浙江工商大学电脑医院预约系统 —— 后端（前后端分离重构版）。
 
 旧项目（`zjgsu-pc-doctor`，2022 年）存在 SQL 注入、注册提权、明文凭据等安全与工程问题。本仓库为全新重写的后端，功能对齐旧版、不迁移旧代码。重构依据见根目录《项目分析报告.md》，任务清单见根目录 `TODO.md`。
@@ -75,9 +77,20 @@ src/main/resources/
 - **API 契约**：[docs/api.md](docs/api.md) —— RESTful 路径 + 权限矩阵 + 错误码表 + 安全要求，前后端以它为准
 - 任务清单：仓库外根目录 `TODO.md`（阶段 0-9 + 安全验收清单）
 
+## 测试
+
+```bash
+./mvnw test    # 全部测试（单元 + MockMvc 集成 + 安全回归，共 55 用例）
+```
+
+- 单元测试：预约状态机/权限规则、密码逻辑、文件白名单与路径穿越（Mockito + 临时目录）
+- 集成测试：test profile + `@Transactional` 回滚（本地复用开发库不污染数据；CI 用 MySQL 服务容器全新库）
+- 安全回归：SQL 注入（登录/搜索/筛选）、注册提权、越权、路径穿越
+- CI：GitHub Actions（push/PR 触发，JDK 21 + MySQL 8 + `./mvnw verify`）
+
 ## 开发状态
 
-阶段 0-4 已完成（2026-08-13）：Flyway 建表与种子数据、Security + JWT 认证授权、全部业务模块接口（用户/预约/留言/文档/活动/分类/配置/文件）。剩余：阶段 5 测试 + CI、阶段 6-7 前端、阶段 8 联调部署。
+阶段 0-5 已完成（2026-08-13）：Flyway 建表与种子数据、Security + JWT 认证授权、全部业务模块接口、测试与 CI。剩余：阶段 6-7 前端、阶段 8 联调部署。
 
 ## 安全约定
 

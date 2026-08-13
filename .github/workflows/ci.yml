@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root-pass-ci
+          MYSQL_DATABASE: pc_doctor
+          MYSQL_USER: pcdoctor
+          MYSQL_PASSWORD: pcdoctor-pass-ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ppcdoctor-pass-ci"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      # 测试库连接与种子管理员密码（application-test.yml 经 TEST_* 注入，避免与开发 .env 混淆）
+      TEST_DB_USERNAME: pcdoctor
+      TEST_DB_PASSWORD: pcdoctor-pass-ci
+      TEST_ADMIN_PASSWORD: "TestAdmin#12345"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # Windows 提交不保留可执行位，Linux 上需补 chmod
+      - name: Build & test
+        run: chmod +x mvnw && ./mvnw -B verify
