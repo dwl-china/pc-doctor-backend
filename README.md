@@ -56,10 +56,14 @@
 | `CORS_ALLOWED_ORIGINS` | CORS 白名单，逗号分隔（不开放 `*`） | `http://localhost:5173,http://127.0.0.1:5173` |
 | `SPRING_PROFILES_ACTIVE` | 激活 profile（dev/prod） | `dev` |
 | `SERVER_PORT` | 服务端口 | `8080` |
+| `ADMIN_USERNAME` / `ADMIN_DISPLAY_NAME` | Flyway 种子管理员账号/昵称（仅首次建库生效） | `admin` / `管理员` |
+| `ADMIN_INITIAL_PASSWORD` | 种子管理员初始密码（仅首次建库生效，迁移时 bcrypt 入库；**上线后请立即登录改密**） | 无 |
+
+> `.env.example` 为全量模板；生产环境用 `.env` 注入真实值，`SPRING_PROFILES_ACTIVE=prod` 可启用 `application-prod.yml` 覆盖。
 
 ## 项目结构
 
-```
+```text
 src/main/java/com/pcdoctor/
 ├── common/      # Result<T> 统一返回体、ErrorCode 业务错误码
 ├── config/      # CORS、MyBatis-Plus 等配置
@@ -75,12 +79,51 @@ src/main/resources/
 ## 文档
 
 - **API 契约**：[docs/api.md](docs/api.md) —— RESTful 路径 + 权限矩阵 + 错误码表 + 安全要求，前后端以它为准
+- **老库迁移**：[docs/migration.sql](docs/migration.sql)（数据迁移脚本）+ [docs/migration-dryrun.md](docs/migration-dryrun.md)（演练手册）
 - 任务清单：仓库外根目录 `TODO.md`（阶段 0-9 + 安全验收清单）
+
+## 生产部署
+
+### 1. 打包
+
+```bash
+./mvnw package            # 含全部测试（56 用例）
+./mvnw package -DskipTests # 跳过测试
+```
+
+产物：`target/pc-doctor-backend-0.0.1-SNAPSHOT.jar`。
+
+### 2. 准备运行环境
+
+- JDK 21；MySQL 8 建库并授权（`pc_doctor`，utf8mb4）
+- 上传目录：`PC_UPLOAD_PATH` 指向的目录需存在且对运行用户可写
+- `.env` 与 jar 同目录（`spring.config.import` 会加载），或改用系统环境变量注入
+
+### 3. 启动
+
+```bash
+java -jar pc-doctor-backend-0.0.1-SNAPSHOT.jar
+# 指定 profile：SPRING_PROFILES_ACTIVE=prod java -jar ...
+```
+
+- 首次启动 Flyway 自动建表 + 种子（admin 密码来自 `ADMIN_INITIAL_PASSWORD`）
+- 建议配 systemd（Linux）或 NSSM/任务计划（Windows）守护，`Restart=always`
+- **上线首日**：登录 admin 改密；若从老库迁移，先按 migration-dryrun.md 演练
+
+### 4. 前端与反向代理
+
+前端 `vite build` 产物由 Nginx 托管，`/api/` 反代到本服务 8080。完整配置（HTTPS、SPA 回退、上传大小限制）见仓库外根目录 `deploy/nginx.conf`。
+
+### 5. 上线前检查
+
+- 逐项核对根目录 `TODO.md` 的安全验收清单（SQL 注入/白名单/密码/凭据/路径/会话/越权/CORS）
+- `CORS_ALLOWED_ORIGINS` 改为生产域名（拒绝 `*`）
+- 若从老库迁移：migration-dryrun.md 演练通过后再动正式库
 
 ## 测试
 
 ```bash
-./mvnw test    # 全部测试（单元 + MockMvc 集成 + 安全回归，共 55 用例）
+./mvnw test    # 全部测试（单元 + MockMvc 集成 + 安全回归，共 56 用例）
 ```
 
 - 单元测试：预约状态机/权限规则、密码逻辑、文件白名单与路径穿越（Mockito + 临时目录）
@@ -90,7 +133,9 @@ src/main/resources/
 
 ## 开发状态
 
-阶段 0-5 已完成（2026-08-13）：Flyway 建表与种子数据、Security + JWT 认证授权、全部业务模块接口、测试与 CI。剩余：阶段 6-7 前端、阶段 8 联调部署。
+- 阶段 0-5 已完成（2026-08-13）：Flyway 建表与种子数据、Security + JWT 认证授权、全部业务模块接口、测试与 CI。
+- 阶段 8（2026-08-14）：前后端联调按契约逐接口核对通过；修复 4 处契约出入（错误码语义/密码强度 1006/分页钳制/JSON 解析 2001）；生产 jar 冒烟通过；走查反馈 6 条全部落地（留言删除修复、电医文档权限、举报体系 V4、首页科普文档、全站字数限制、预约图片脱敏）；老数据迁移演练通过；安全验收八项全勾。
+- 剩余：正式部署 + 上线后观察（TODO 10.3）；QQ 机器人通知（TODO 5.9，暂缓项）。
 
 ## 安全约定
 

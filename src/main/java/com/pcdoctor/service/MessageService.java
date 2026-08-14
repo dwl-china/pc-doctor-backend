@@ -1,5 +1,6 @@
 package com.pcdoctor.service;
 
+import com.pcdoctor.common.TransactionAfterCommit;
 import com.pcdoctor.exception.BizException;
 import com.pcdoctor.common.ErrorCode;
 import com.pcdoctor.dto.MessageRequest;
@@ -23,10 +24,13 @@ public class MessageService {
 
     private final MessageMapper messageMapper;
     private final AppointmentMapper appointmentMapper;
+    private final FileService fileService;
 
-    public MessageService(MessageMapper messageMapper, AppointmentMapper appointmentMapper) {
+    public MessageService(MessageMapper messageMapper, AppointmentMapper appointmentMapper,
+                          FileService fileService) {
         this.messageMapper = messageMapper;
         this.appointmentMapper = appointmentMapper;
+        this.fileService = fileService;
     }
 
     /** 留言列表（公开） */
@@ -51,6 +55,24 @@ public class MessageService {
                 .filter(v -> v.id().equals(m.getId()))
                 .findFirst()
                 .orElseThrow(() -> new BizException(ErrorCode.SYSTEM_ERROR));
+    }
+
+    /**
+     * 删除留言（走查建议 #3）：本人可删自己的留言；电医/管理员可删任意留言（处置违法内容）。
+     * 留言图片连带清理（事务提交后执行，#5.10）。
+     */
+    @Transactional
+    public void delete(Long messageId, String currentUser, boolean privileged) {
+        AppointmentMessage m = messageMapper.selectById(messageId);
+        if (m == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "留言不存在");
+        }
+        if (!privileged && !m.getUserId().equals(currentUser)) {
+            throw new BizException(ErrorCode.FORBIDDEN);
+        }
+        messageMapper.deleteById(messageId);
+        TransactionAfterCommit.run(() -> fileService.deleteManaged(m.getPicture()));
+        log.info("留言删除: appointmentId={}, messageId={}, operator={}", m.getAppointmentId(), messageId, currentUser);
     }
 
     private void requireAppointment(Long appointmentId) {

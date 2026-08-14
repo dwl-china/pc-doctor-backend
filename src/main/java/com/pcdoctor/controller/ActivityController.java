@@ -6,6 +6,8 @@ import com.pcdoctor.dto.PageView;
 import com.pcdoctor.entity.Activity;
 import com.pcdoctor.service.ActivityService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,12 +18,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * 活动接口（契约 §4.7）：读公开，写管理员。
  */
 @RestController
 @RequestMapping("/api/activities")
+@Validated
 public class ActivityController {
 
     private final ActivityService activityService;
@@ -31,8 +35,8 @@ public class ActivityController {
     }
 
     @GetMapping
-    public Result<PageView<Activity>> list(@RequestParam(defaultValue = "1") int page,
-                                           @RequestParam(defaultValue = "10") int size) {
+    public Result<PageView<Activity>> list(@RequestParam(defaultValue = "1") @Min(value = 1, message = "page 最小为 1") int page,
+                                           @RequestParam(defaultValue = "10") @Min(value = 1, message = "size 最小为 1") @Max(value = 100, message = "size 最大为 100") int size) {
         return Result.ok(activityService.list(page, size));
     }
 

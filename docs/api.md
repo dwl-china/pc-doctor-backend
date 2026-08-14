@@ -74,6 +74,8 @@
 }
 ```
 
+> `userDescription`/`userPicture`/`contactDetails` 为 null 或空时省略该字段。
+
 ### 4.2 用户 users
 
 | 方法 | 路径 | 鉴权 | 说明 |
@@ -98,11 +100,11 @@
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|
-| GET | `/api/appointments` | 公开 | 预约列表，query: `page,size,status,user_id,mine=1`（mine 需登录）；公开查询返回脱敏字段（不含联系方式） |
+| GET | `/api/appointments` | 公开 | 预约列表，query: `page,size,status,user_id,doctor_id,mine=1`（mine 需登录）；公开查询返回脱敏字段（不含联系方式） |
 | GET | `/api/appointments/{id}` | 公开 | 预约详情（含发单用户与电医信息、消息列表） |
 | POST | `/api/appointments` | 登录 | 提交预约，body: `{"problem_description","category_id","problem_picture","available_time","appointment_location"}` |
 | PUT | `/api/appointments/{id}` | 登录 | 更新预约。本人可改自己未接单的预约；电医仅可改自己接的单 |
-| DELETE | `/api/appointments/{id}` | 登录 | 撤销/删除。本人（未接单）或管理员 |
+| DELETE | `/api/appointments/{id}` | 登录 | 撤销/删除。本人（未接单）/ 电医（自己接的单）/ 管理员 |
 | POST | `/api/appointments/{id}/accept` | 电医 | 接单：status 0→1，写 appointment_time、doctor_id |
 | POST | `/api/appointments/{id}/complete` | 电医 | 完成：status 1→2，写 done_time（仅接单者本人） |
 
@@ -137,6 +139,7 @@ status 语义：`0` 排队中 / `1` 处理中 / `2` 已完成。
 |---|---|---|---|
 | GET | `/api/appointments/{id}/messages` | 公开 | 该预约的留言列表 |
 | POST | `/api/appointments/{id}/messages` | 登录 | 发留言，body: `{"message":"...","picture":"可选图url"}` |
+| DELETE | `/api/messages/{messageId}` | 登录 | 删除留言：本人可删自己的；电医/管理员可删任意（处置违法内容，走查建议 #3）；连带删除留言图片 |
 
 留言对象：`{"id","appointmentId","userId","userName","message","picture","time"}`
 
@@ -146,9 +149,9 @@ status 语义：`0` 排队中 / `1` 处理中 / `2` 已完成。
 |---|---|---|---|
 | GET | `/api/documents` | 公开 | 文档列表，query: `page,size,title`（模糊搜索） |
 | GET | `/api/documents/{id}` | 公开 | 文档详情 |
-| POST | `/api/documents` | 管理员 | 新建，multipart 或 json：`{"title","summary","file"}` |
-| PUT | `/api/documents/{id}` | 管理员 | 更新 |
-| DELETE | `/api/documents/{id}` | 管理员 | 删除（连带删除文件） |
+| POST | `/api/documents` | 电医+ | 新建，multipart 或 json：`{"title","summary","file"}`（2026-08-14 走查建议：电医可编辑文档） |
+| PUT | `/api/documents/{id}` | 电医+ | 更新 |
+| DELETE | `/api/documents/{id}` | 电医+ | 删除（连带删除文件） |
 
 ### 4.7 活动 activities
 
@@ -156,7 +159,7 @@ status 语义：`0` 排队中 / `1` 处理中 / `2` 已完成。
 |---|---|---|---|
 | GET | `/api/activities` | 公开 | 活动列表，query: `page,size` |
 | GET | `/api/activities/{id}` | 公开 | 活动详情 |
-| POST | `/api/activities` | 管理员 | 新建：`{"title","summary","cover","file"}` |
+| POST | `/api/activities` | 管理员 | 新建：`{"title","summary","file"}`（file=详情文件 url，必填；cover=封面 url，可选） |
 | PUT | `/api/activities/{id}` | 管理员 | 更新 |
 | DELETE | `/api/activities/{id}` | 管理员 | 删除 |
 
@@ -184,6 +187,16 @@ status 语义：`0` 排队中 / `1` 处理中 / `2` 已完成。
 
 允许类型：jpg/jpeg/png/webp/gif（图片）、md（文档）、pdf。
 
+### 4.11 举报 reports（走查建议 #3）
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| POST | `/api/reports` | 登录 | 提交举报，body: `{"target_type":1|2,"target_id":<id>,"reason":"..."}`（1=预约 2=留言）；同一人同一目标仅一次，重复返回 2001 |
+| GET | `/api/admin/reports` | 管理员 | 举报列表，query: `page,size,status`（0=待处理 1=已处理）；含目标快照 `targetSummary` |
+| PUT | `/api/admin/reports/{id}/handle` | 管理员 | 标记已处理 |
+
+举报对象：`{"id","targetType","targetId","reason","reporterId","status","createTime","handleTime","handlerId","targetSummary"}`
+
 ## 5. 权限矩阵速查
 
 | 接口 | 公开 | 用户 | 电医 | 管理员 |
@@ -191,9 +204,13 @@ status 语义：`0` 排队中 / `1` 处理中 / `2` 已完成。
 | login/register/doctors/categories(GET)/config(GET)/documents(GET)/activities(GET)/appointments(GET) | ✓ | ✓ | ✓ | ✓ |
 | auth/me、users/me、files(POST)、appointments(POST)、messages(POST) | | ✓ | ✓ | ✓ |
 | appointments/{id}/accept、complete | | | ✓ | ✓ |
-| appointments/{id}(PUT/DELETE) | | 本人 | 本人/自己接的单 | ✓ |
+| appointments/{id}(PUT) | | 本人 | 本人/自己接的单 | ✓ |
+| appointments/{id}(DELETE) | | 本人(未接单) | 本人(未接单)/自己接的单 | ✓ |
+| messages(DELETE) | | 自己发的 | 任意 | ✓ |
 | config/qq-group(PUT) | | | ✓ | ✓ |
-| admin/**、documents/activities/categories(写) | | | | ✓ |
+| documents(写) | | | ✓ | ✓ |
+| reports(POST) | | ✓ | ✓ | ✓ |
+| admin/reports、activities/categories(写) | | | | ✓ |
 
 ## 6. 安全要求（实现时强制）
 

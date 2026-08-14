@@ -117,6 +117,9 @@ public class UserService {
         if (request.newPassword().equals(request.oldPassword())) {
             throw new BizException(ErrorCode.PASSWORD_TOO_WEAK, "新密码不能与旧密码相同");
         }
+        if (request.newPassword().length() < 8) {
+            throw new BizException(ErrorCode.PASSWORD_TOO_WEAK, "密码长度须为 8-64 位");
+        }
         User user = requireUser(userId);
         if (!passwordEncoder.matches(request.oldPassword(), user.getPasswordHash())) {
             throw new BizException(ErrorCode.BAD_CREDENTIALS, "旧密码错误");

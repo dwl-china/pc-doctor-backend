@@ -7,6 +7,8 @@ import com.pcdoctor.dto.AppointmentView;
 import com.pcdoctor.dto.PageView;
 import com.pcdoctor.service.AppointmentService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -18,12 +20,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * 预约接口（契约 §4.4）。
  */
 @RestController
 @RequestMapping("/api/appointments")
+@Validated
 public class AppointmentController {
 
     private final AppointmentService appointmentService;
@@ -34,20 +38,24 @@ public class AppointmentController {
 
     /** 列表（公开；mine=1 需登录） */
     @GetMapping
-    public Result<PageView<AppointmentView>> list(@RequestParam(defaultValue = "1") int page,
-                                                  @RequestParam(defaultValue = "10") int size,
+    public Result<PageView<AppointmentView>> list(@RequestParam(defaultValue = "1") @Min(value = 1, message = "page 最小为 1") int page,
+                                                  @RequestParam(defaultValue = "10") @Min(value = 1, message = "size 最小为 1") @Max(value = 100, message = "size 最大为 100") int size,
                                                   @RequestParam(required = false) Integer status,
                                                   @RequestParam(name = "user_id", required = false) String userId,
+                                                  @RequestParam(name = "doctor_id", required = false) String doctorId,
                                                   @RequestParam(defaultValue = "0") int mine,
                                                   Authentication authentication) {
         String currentUser = authentication == null ? null : authentication.getName();
-        return Result.ok(appointmentService.list(page, size, status, userId, mine == 1, currentUser));
+        return Result.ok(appointmentService.list(page, size, status, userId, doctorId, mine == 1,
+                currentUser, isAdmin(authentication)));
     }
 
-    /** 详情（公开） */
+    /** 详情（公开；图片仅本人/该单电医/管理员可见，#6） */
     @GetMapping("/{id}")
-    public Result<AppointmentView> detail(@PathVariable Long id) {
-        return Result.ok(appointmentService.detail(id));
+    public Result<AppointmentView> detail(@PathVariable Long id, Authentication authentication) {
+        return Result.ok(appointmentService.detail(id,
+                authentication == null ? null : authentication.getName(),
+                isAdmin(authentication)));
     }
 
     /** 提交预约（登录） */
@@ -66,10 +74,11 @@ public class AppointmentController {
                 isAdmin(authentication)));
     }
 
-    /** 撤销/删除（登录；本人未接单单 / 管理员） */
+    /** 撤销/删除（登录；本人未接单单 / 电医自己接的单 / 管理员） */
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id, Authentication authentication) {
-        appointmentService.delete(id, authentication.getName(), isAdmin(authentication));
+        appointmentService.delete(id, authentication.getName(), isAdmin(authentication),
+                isDoctor(authentication));
         return Result.ok();
     }
 
@@ -88,7 +97,12 @@ public class AppointmentController {
     }
 
     private boolean isAdmin(Authentication authentication) {
-        return authentication.getAuthorities().stream()
+        return authentication != null && authentication.getAuthorities().stream()
                 .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+    }
+
+    private boolean isDoctor(Authentication authentication) {
+        return authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_DOCTOR".equals(a.getAuthority()));
     }
 }

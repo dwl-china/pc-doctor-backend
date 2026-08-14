@@ -2,8 +2,10 @@ package com.pcdoctor.exception;
 
 import com.pcdoctor.common.ErrorCode;
 import com.pcdoctor.common.Result;
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -46,6 +48,23 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public Result<Void> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
         return Result.fail(ErrorCode.INVALID_PARAM);
+    }
+
+    /** 请求体无法解析（JSON 格式错误/编码错误），属客户端问题而非系统故障 */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public Result<Void> handleUnreadable(HttpMessageNotReadableException e) {
+        log.warn("请求体解析失败: {}", e.getMessage());
+        return Result.fail(ErrorCode.INVALID_PARAM.getCode(), "请求体格式错误");
+    }
+
+    /** 方法参数校验失败（@RequestParam/@PathVariable 上的 @Min/@Max 等，如分页参数越界） */
+    @ExceptionHandler(ConstraintViolationException.class)
+    public Result<Void> handleConstraint(ConstraintViolationException e) {
+        String message = e.getConstraintViolations().stream()
+                .findFirst()
+                .map(v -> v.getMessage())
+                .orElse(ErrorCode.INVALID_PARAM.getMessage());
+        return Result.fail(ErrorCode.INVALID_PARAM.getCode(), message);
     }
 
     /** MVC 层的权限拒绝 */

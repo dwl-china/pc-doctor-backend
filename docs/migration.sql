@@ -41,8 +41,9 @@ WHERE u.user_id NOT IN ('2012190330', 'admin123')            -- TODO 3.2 弱账�
 
 -- ----------------------------------------------------------------------------
 -- 2. 分类表：老库分类名 → 新库 id
---    映射约定（老库自由文本与种子分类对齐）：
---      '系统' → 系统问题；'网络' → 系统问题；其余同名直插（唯一键保护，重复跳过）
+--    2026-08-13 备份实况：老库分类表 5 条与种子完全同名 → INSERT IGNORE 全部跳过。
+--    预约表的 problem_category 是自由文本（'系统'/'网络' 等），不保证落在分类表内，
+--    同名匹配不到时兜底到「系统问题」（见步骤 3）。
 -- ----------------------------------------------------------------------------
 INSERT IGNORE INTO pc_doctor.category_table (name)
 SELECT category FROM demo.category_table;
@@ -55,7 +56,7 @@ INSERT INTO pc_doctor.appointment_table
      appointment_location, status, doctor_id, create_time, appointment_time, done_time)
 SELECT a.user_id,
        a.problem_description,
-       COALESCE(c.id, (SELECT id FROM pc_doctor.category_table WHERE name = '系统问题')),
+       COALESCE(c.id, fallback.id),
        NULLIF(a.problem_picture, ''),
        NULLIF(a.available_time, ''),
        a.appointment_location,

@@ -46,6 +46,9 @@ public class AuthService {
      * 注册（注册即登录）。level 恒为 0，不接受客户端传值（#2、#4.4）。
      */
     public AuthResponse register(RegisterRequest request) {
+        if (request.password().length() < 8) {
+            throw new BizException(ErrorCode.PASSWORD_TOO_WEAK, "密码长度须为 8-64 位");
+        }
         if (userMapper.selectById(request.userId()) != null) {
             throw new BizException(ErrorCode.ACCOUNT_EXISTS);
         }

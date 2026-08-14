@@ -77,7 +77,7 @@ class PermissionMatrixIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("文档写：未登录 401 / 用户 403 / 电医 403 / 管理员 200")
+    @DisplayName("文档写：未登录 401 / 用户 403 / 电医 200（走查建议#2）/ 管理员 200")
     void documentPostMatrix() throws Exception {
         prepareRoles();
         String body = "{\"title\":\"matrix-doc\",\"summary\":\"\",\"file\":\"/api/files/doc/x.md\"}";
@@ -88,7 +88,7 @@ class PermissionMatrixIntegrationTest extends BaseIntegrationTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/documents").header("Authorization", "Bearer " + doctorToken)
                         .contentType("application/json").content(body))
-                .andExpect(status().isForbidden());
+                .andExpect(jsonPath("$.code").value(0));
         mockMvc.perform(post("/api/documents").header("Authorization", "Bearer " + adminToken)
                         .contentType("application/json").content(body))
                 .andExpect(jsonPath("$.code").value(0));

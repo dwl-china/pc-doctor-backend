@@ -16,7 +16,7 @@ public record RegisterRequest(
         String userId,
 
         @NotBlank(message = "密码不能为空")
-        @Size(min = 8, max = 64, message = "密码长度须为 8-64 位")
+        @Size(max = 64, message = "密码最长 64 位")
         String password,
 
         @JsonProperty("user_name")

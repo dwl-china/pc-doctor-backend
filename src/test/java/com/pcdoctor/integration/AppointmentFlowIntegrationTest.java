@@ -3,6 +3,7 @@ package com.pcdoctor.integration;
 import com.pcdoctor.BaseIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.web.servlet.MvcResult;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -63,6 +64,28 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisplayName("doctor_id 筛选：电医工作台按自己接的单过滤（§4.4）")
+    void doctorFilter() throws Exception {
+        String adminToken = adminToken();
+        String u = register(nextUserId("df"));
+        String d1 = register(nextUserId("d1"));
+        String d2 = register(nextUserId("d2"));
+        promoteToDoctor(adminToken, userIdOf(d1));
+        promoteToDoctor(adminToken, userIdOf(d2));
+        long appt1 = submitAppointment(u, "appt 1", 1L);
+        long appt2 = submitAppointment(u, "appt 2", 1L);
+        mockMvc.perform(post("/api/appointments/" + appt1 + "/accept")
+                .header("Authorization", "Bearer " + d1));
+        mockMvc.perform(post("/api/appointments/" + appt2 + "/accept")
+                .header("Authorization", "Bearer " + d2));
+
+        mockMvc.perform(get("/api/appointments?status=1&doctor_id=" + userIdOf(d1)))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.records.length()").value(1))
+                .andExpect(jsonPath("$.data.records[0].id").value(appt1));
+    }
+
+    @Test
     @DisplayName("权限：他人改单 3002、本人改未接单单成功、已接单单不可删（#9）")
     void ownershipRules() throws Exception {
         String adminToken = adminToken();
@@ -84,12 +107,12 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
                         .contentType("application/json")
                         .content("{\"problem_description\":\"my own edit\"}"))
                 .andExpect(jsonPath("$.code").value(0));
-        // 电医接单后 u2 删除 → 3002
+        // 电医接单后 u2 删除自己的单 → 2003（本人但状态不允许）
         mockMvc.perform(post("/api/appointments/" + appt + "/accept")
                 .header("Authorization", "Bearer " + doctor));
         mockMvc.perform(delete("/api/appointments/" + appt)
                         .header("Authorization", "Bearer " + u2))
-                .andExpect(jsonPath("$.code").value(3002));
+                .andExpect(jsonPath("$.code").value(2003));
     }
 
     @Test
@@ -106,6 +129,68 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.records.length()").value(1))
                 .andExpect(jsonPath("$.data.records[0].id").value(own));
+    }
+
+    @Test
+    @DisplayName("回归（走查 bug#1）：有留言的排队预约，本人撤销成功，留言一并清除")
+    void deleteWithMessages() throws Exception {
+        String u = register(nextUserId("dm"));
+        long appt = submitAppointment(u, "has messages", 1L);
+        mockMvc.perform(post("/api/appointments/" + appt + "/messages")
+                        .header("Authorization", "Bearer " + u)
+                        .contentType("application/json").content("{\"message\":\"will be deleted\"}"))
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(delete("/api/appointments/" + appt)
+                        .header("Authorization", "Bearer " + u))
+                .andExpect(jsonPath("$.code").value(0));
+        // 预约已删，留言随之外键关联失效（3001 预约不存在，而非删除时 500）
+        mockMvc.perform(get("/api/appointments/" + appt + "/messages"))
+                .andExpect(jsonPath("$.code").value(3001));
+    }
+
+    @Test
+    @DisplayName("回归（走查建议#6）：预约图片公开响应脱敏，本人/接单电医/管理员可见")
+    void pictureSanitized() throws Exception {
+        String adminToken = adminToken();
+        String u = register(nextUserId("pic"));
+        String d = register(nextUserId("picd"));
+        promoteToDoctor(adminToken, userIdOf(d));
+        long appt = submitAppointmentWithPicture(u, "with picture");
+        String pic = "/api/files/appointment/regression-pic.png";
+
+        // 公开列表：图片字段不出现
+        mockMvc.perform(get("/api/appointments"))
+                .andExpect(jsonPath("$.data.records[0].problemPicture").doesNotExist());
+        // 公开详情：不出现
+        mockMvc.perform(get("/api/appointments/" + appt))
+                .andExpect(jsonPath("$.data.problemPicture").doesNotExist());
+        // 本人详情：可见
+        mockMvc.perform(get("/api/appointments/" + appt).header("Authorization", "Bearer " + u))
+                .andExpect(jsonPath("$.data.problemPicture").value(pic));
+        // 接单电医详情：可见
+        mockMvc.perform(post("/api/appointments/" + appt + "/accept")
+                .header("Authorization", "Bearer " + d));
+        mockMvc.perform(get("/api/appointments/" + appt).header("Authorization", "Bearer " + d))
+                .andExpect(jsonPath("$.data.problemPicture").value(pic));
+        // 管理员详情：可见
+        mockMvc.perform(get("/api/appointments/" + appt).header("Authorization", "Bearer " + adminToken))
+                .andExpect(jsonPath("$.data.problemPicture").value(pic));
+        // 无关用户详情：不出现
+        String other = register(nextUserId("pico"));
+        mockMvc.perform(get("/api/appointments/" + appt).header("Authorization", "Bearer " + other))
+                .andExpect(jsonPath("$.data.problemPicture").doesNotExist());
+    }
+
+    /** 带图片提交预约（图片 URL 为占位符，不实际落盘） */
+    private long submitAppointmentWithPicture(String token, String description) throws Exception {
+        String pic = "/api/files/appointment/regression-pic.png";
+        MvcResult result = mockMvc.perform(post("/api/appointments")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content("{\"problem_description\":\"" + description + "\",\"category_id\":1,"
+                                + "\"problem_picture\":\"" + pic + "\"}"))
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString()).at("/data/id").asLong();
     }
 
     private String userIdOf(String token) throws Exception {

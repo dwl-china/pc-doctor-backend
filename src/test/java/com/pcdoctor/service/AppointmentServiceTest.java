@@ -8,10 +8,12 @@ import com.pcdoctor.common.ErrorCode;
 import com.pcdoctor.dto.AppointmentSubmitRequest;
 import com.pcdoctor.dto.AppointmentUpdateRequest;
 import com.pcdoctor.entity.Appointment;
+import com.pcdoctor.entity.AppointmentMessage;
 import com.pcdoctor.entity.Category;
 import com.pcdoctor.entity.User;
 import com.pcdoctor.mapper.AppointmentMapper;
 import com.pcdoctor.mapper.CategoryMapper;
+import com.pcdoctor.mapper.MessageMapper;
 import com.pcdoctor.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,6 +42,8 @@ class AppointmentServiceTest {
     @Mock
     CategoryMapper categoryMapper;
     @Mock
+    MessageMapper messageMapper;
+    @Mock
     FileService fileService;
 
     AppointmentService service;
@@ -50,10 +54,11 @@ class AppointmentServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AppointmentService(appointmentMapper, userMapper, categoryMapper, fileService);
+        service = new AppointmentService(appointmentMapper, userMapper, categoryMapper, messageMapper, fileService);
         // 纯 Mockito 环境无 Spring 上下文，MyBatis-Plus 的 Lambda 包装器依赖 TableInfo 缓存，
         // 需显式预热（否则 CI 上测试类执行顺序不同会抛 "can not find lambda cache"）
         TableInfoHelper.initTableInfo(new MybatisMapperBuilderAssistant(new MybatisConfiguration(), ""), Appointment.class);
+        TableInfoHelper.initTableInfo(new MybatisMapperBuilderAssistant(new MybatisConfiguration(), ""), AppointmentMessage.class);
         queued = appointment(1L, "u1", Appointment.STATUS_QUEUED, null);
         processing = appointment(2L, "u1", Appointment.STATUS_PROCESSING, "doc1");
         done = appointment(3L, "u1", Appointment.STATUS_DONE, "doc1");
@@ -162,7 +167,7 @@ class AppointmentServiceTest {
             service.update(2L, request(), "doc1", false);
             assertThatThrownBy(() -> service.update(3L, request(), "doc1", false))
                     .isInstanceOfSatisfying(BizException.class,
-                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.APPOINTMENT_OWNERSHIP));
+                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_STATUS));
         }
 
         @Test
@@ -181,17 +186,27 @@ class AppointmentServiceTest {
         @DisplayName("本人删未接单单 → 成功")
         void ownerDeleteQueued() {
             when(appointmentMapper.selectById(1L)).thenReturn(queued);
-            service.delete(1L, "u1", false);
+            service.delete(1L, "u1", false, false);
         }
 
         @Test
-        @DisplayName("本人删已接单单 → 拒绝；管理员可删")
+        @DisplayName("本人删已接单单 → INVALID_STATUS（本人但状态不允许）；管理员可删")
         void ownerDeleteProcessing() {
             when(appointmentMapper.selectById(2L)).thenReturn(processing);
-            assertThatThrownBy(() -> service.delete(2L, "u1", false))
+            assertThatThrownBy(() -> service.delete(2L, "u1", false, false))
+                    .isInstanceOfSatisfying(BizException.class,
+                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_STATUS));
+            service.delete(2L, "u1", true, false);
+        }
+
+        @Test
+        @DisplayName("电医删自己接的单 → 成功；电医删他人单 → APPOINTMENT_OWNERSHIP（走查建议 #3）")
+        void doctorDeleteOwn() {
+            when(appointmentMapper.selectById(2L)).thenReturn(processing);
+            service.delete(2L, "doc1", false, true);
+            assertThatThrownBy(() -> service.delete(2L, "doc2", false, true))
                     .isInstanceOfSatisfying(BizException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.APPOINTMENT_OWNERSHIP));
-            service.delete(2L, "u1", true);
         }
     }
 

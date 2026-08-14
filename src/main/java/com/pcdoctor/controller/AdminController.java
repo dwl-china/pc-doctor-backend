@@ -8,6 +8,8 @@ import com.pcdoctor.dto.PageView;
 import com.pcdoctor.dto.UserView;
 import com.pcdoctor.service.UserService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.Map;
 
@@ -28,6 +31,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/admin")
 @PreAuthorize("hasRole('ADMIN')")
+@Validated
 public class AdminController {
 
     private final UserService userService;
@@ -38,8 +42,8 @@ public class AdminController {
 
     /** 用户列表：搜索/分页 */
     @GetMapping("/users")
-    public Result<PageView<UserView>> users(@RequestParam(defaultValue = "1") int page,
-                                            @RequestParam(defaultValue = "10") int size,
+    public Result<PageView<UserView>> users(@RequestParam(defaultValue = "1") @Min(value = 1, message = "page 最小为 1") int page,
+                                            @RequestParam(defaultValue = "10") @Min(value = 1, message = "size 最小为 1") @Max(value = 100, message = "size 最大为 100") int size,
                                             @RequestParam(name = "user_id", required = false) String userId,
                                             @RequestParam(name = "user_name", required = false) String userName,
                                             @RequestParam(required = false) Integer level) {
@@ -77,8 +81,8 @@ public class AdminController {
 
     /** 电医列表 + 接单统计 */
     @GetMapping("/doctors")
-    public Result<PageView<DoctorStatView>> doctors(@RequestParam(defaultValue = "1") int page,
-                                                    @RequestParam(defaultValue = "10") int size) {
+    public Result<PageView<DoctorStatView>> doctors(@RequestParam(defaultValue = "1") @Min(value = 1, message = "page 最小为 1") int page,
+                                                    @RequestParam(defaultValue = "10") @Min(value = 1, message = "size 最小为 1") @Max(value = 100, message = "size 最大为 100") int size) {
         return Result.ok(userService.adminDoctorStats(page, size));
     }
 }

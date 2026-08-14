@@ -21,4 +21,11 @@ public record AppointmentView(
         LocalDateTime createTime,
         LocalDateTime appointmentTime,
         LocalDateTime doneTime) {
+
+    /** 复制并替换 problemPicture（公开响应脱敏用，走查建议 #6） */
+    public AppointmentView withPicture(String picture) {
+        return new AppointmentView(id, userId, userName, problemDescription, categoryId, categoryName,
+                picture, availableTime, appointmentLocation, status, doctorId, doctorName,
+                createTime, appointmentTime, doneTime);
+    }
 }
