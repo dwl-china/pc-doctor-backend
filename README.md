@@ -2,9 +2,19 @@
 
 [![CI](https://github.com/dwl-china/pc-doctor-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/dwl-china/pc-doctor-backend/actions/workflows/ci.yml)
 
-浙江工商大学电脑医院预约系统 —— 后端（前后端分离重构版）。
+电脑医院预约系统 —— 后端（重构版）。
 
-旧项目（`zjgsu-pc-doctor`，2022 年）存在 SQL 注入、注册提权、明文凭据等安全与工程问题。本仓库为全新重写的后端，功能对齐旧版、不迁移旧代码。重构依据见根目录《项目分析报告.md》，任务清单见根目录 `TODO.md`。
+旧项目（[zjgsu-pc-doctor](https://github.com/mdd3135/zjgsu-pc-doctor)，2022 年）存在 SQL 注入、注册提权、明文凭据等安全与工程问题。本仓库为全新重写的后端，功能对齐旧版、不迁移旧代码。
+
+## 关于本项目
+
+本项目来自**浙江工商大学**兴趣社团X计算机协会**电脑医院**
+
+**X计算机协会**成立于1995年，是一个面向全校、以营造校园科技文化氛围，推广计算机应用操作为宗旨的学术科技类社团。
+
+**电脑医院**隶属于浙江工商大学计算机协会，旨在为在校师生提供免费、专业、便捷的IT技术支援活动
+
+本项目为公益项目，是电脑医院内部自行组织、开发的系统。
 
 ## 技术栈
 
