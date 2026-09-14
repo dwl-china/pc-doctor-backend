@@ -1,6 +1,7 @@
 package com.pcdoctor.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.pcdoctor.exception.BizException;
 import com.pcdoctor.common.ErrorCode;
@@ -11,6 +12,7 @@ import com.pcdoctor.dto.AppointmentView;
 import com.pcdoctor.dto.PageView;
 import com.pcdoctor.entity.Appointment;
 import com.pcdoctor.entity.Category;
+import com.pcdoctor.entity.Report;
 import com.pcdoctor.entity.User;
 import com.pcdoctor.mapper.AppointmentMapper;
 import com.pcdoctor.mapper.CategoryMapper;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 预约核心服务（#5.2）：
@@ -37,15 +40,17 @@ public class AppointmentService {
     private final CategoryMapper categoryMapper;
     private final MessageMapper messageMapper;
     private final FileService fileService;
+    private final ReportService reportService;
 
     public AppointmentService(AppointmentMapper appointmentMapper, UserMapper userMapper,
                               CategoryMapper categoryMapper, MessageMapper messageMapper,
-                              FileService fileService) {
+                              FileService fileService, ReportService reportService) {
         this.appointmentMapper = appointmentMapper;
         this.userMapper = userMapper;
         this.categoryMapper = categoryMapper;
         this.messageMapper = messageMapper;
         this.fileService = fileService;
+        this.reportService = reportService;
     }
 
     /** 分页列表（公开）：status/user_id/doctor_id 筛选，mine=1 需登录；联表出昵称与分类名 */
@@ -144,11 +149,20 @@ public class AppointmentService {
                 throw new BizException(ErrorCode.APPOINTMENT_OWNERSHIP);
             }
         }
+        // 先记下留言 id：预约删掉后这些留言的内容也没了，相关举报要一并了结
+        List<Long> messageIds = messageMapper.selectList(
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.pcdoctor.entity.AppointmentMessage>()
+                                .select(com.pcdoctor.entity.AppointmentMessage::getId)
+                                .eq(com.pcdoctor.entity.AppointmentMessage::getAppointmentId, id))
+                .stream().map(com.pcdoctor.entity.AppointmentMessage::getId).toList();
         // 先删留言再删预约（fk_message_appointment 无级联删除；走查 bug#1：有留言的预约撤销报 500）
         messageMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.pcdoctor.entity.AppointmentMessage>()
                 .eq(com.pcdoctor.entity.AppointmentMessage::getAppointmentId, id));
         String picture = a.getProblemPicture();
         appointmentMapper.deleteById(id);
+        // 内容已不存在，相关举报一并置为已处理（只动待处理的），避免留下点进去报错的待处理项
+        reportService.autoHandleByTargets(Report.TYPE_APPOINTMENT, List.of(id), currentUser);
+        reportService.autoHandleByTargets(Report.TYPE_MESSAGE, messageIds, currentUser);
         TransactionAfterCommit.run(() -> fileService.deleteManaged(picture));
         log.info("预约删除: id={}, operator={}", id, currentUser);
     }
@@ -194,6 +208,75 @@ public class AppointmentService {
         }
         log.info("完成: appointmentId={}, doctorId={}", id, doctorId);
         return detail(id, doctorId, false);
+    }
+
+    /**
+     * 管理员改状态（契约 §4.3）：电医误操作时的兜底修正入口。
+     *
+     * <p>语义是「按目标状态反推字段」，而不是只翻一个 status：
+     * <ul>
+     *   <li>0 排队中 → 清空接单电医与两个时间戳</li>
+     *   <li>1 处理中 → 必须有电医（沿用现有或新指定），换人才刷新接单时间，清完成时间</li>
+     *   <li>2 已完成 → 沿用接单信息，缺完成时间则补；可顺带补登记接单电医</li>
+     * </ul>
+     *
+     * <p>两句实现上的注意：MyBatis-Plus 默认不更新 null 字段，清空必须显式
+     * {@code .set(col, null)}；且只能 {@code update(null, wrapper)}，传非 null 实体会把它的
+     * 非空字段合并进 SET 子句。另外用「比对读到的旧状态」做 CAS，避免管理员读取与写入之间
+     * 电医刚接单、接单信息被静默覆盖。
+     */
+    @Transactional
+    public AppointmentView adminSetStatus(Long id, Integer status, String doctorId) {
+        Appointment a = requireAppointment(id);
+        int oldStatus = a.getStatus();
+        String requested = (doctorId == null || doctorId.isBlank()) ? null : doctorId;
+
+        LambdaUpdateWrapper<Appointment> uw = new LambdaUpdateWrapper<Appointment>()
+                .eq(Appointment::getId, id)
+                .eq(Appointment::getStatus, oldStatus)          // 并发保护：状态被他人变更则改不动
+                .set(Appointment::getStatus, status);
+
+        if (status == Appointment.STATUS_QUEUED) {
+            uw.set(Appointment::getDoctorId, null)
+                    .set(Appointment::getAppointmentTime, null)
+                    .set(Appointment::getDoneTime, null);
+        } else if (status == Appointment.STATUS_PROCESSING) {
+            String target = requested != null ? requested : a.getDoctorId();
+            if (target == null) {
+                throw new BizException(ErrorCode.INVALID_PARAM, "改为处理中必须指定接单电医");
+            }
+            requireDoctor(target);
+            uw.set(Appointment::getDoctorId, target)
+                    .set(Appointment::getDoneTime, null);
+            if (!target.equals(a.getDoctorId()) || a.getAppointmentTime() == null) {
+                uw.set(Appointment::getAppointmentTime, LocalDateTime.now());
+            }
+        } else {
+            if (requested != null) {
+                requireDoctor(requested);
+                uw.set(Appointment::getDoctorId, requested);
+            }
+            if (a.getDoneTime() == null) {
+                uw.set(Appointment::getDoneTime, LocalDateTime.now());
+            }
+        }
+
+        int rows = appointmentMapper.update(null, uw);
+        if (rows == 0) {
+            throw new BizException(ErrorCode.INVALID_STATUS, "预约状态已被他人变更，请刷新后重试");
+        }
+        log.info("管理员改预约状态: id={}, {}→{}, doctor={}", id, oldStatus, status,
+                requested != null ? requested : a.getDoctorId());
+        return detail(id, null, true);
+    }
+
+    /** 校验目标账号确实是电医（level 严格 == 1）：不校验会撞 fk_appointment_doctor → 5001；
+     *  放宽成 &gt;=1 则会把管理员/普通用户派成接单人，造出电医工作台查不到的幽灵单。 */
+    private void requireDoctor(String userId) {
+        User u = userMapper.selectById(userId);
+        if (u == null || !Integer.valueOf(1).equals(u.getLevel())) {
+            throw new BizException(ErrorCode.INVALID_PARAM, "接单电医不存在或该账号不是电医");
+        }
     }
 
     private Appointment requireAppointment(Long id) {

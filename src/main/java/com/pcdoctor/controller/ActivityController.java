@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.validation.annotation.Validated;
 
 /**
- * 活动接口（契约 §4.7）：读公开，写管理员。
+ * 活动接口（契约 §4.7）：读公开，写电医+（走查建议 #2 同文档模块，电医可自行发布活动）。
  */
 @RestController
 @RequestMapping("/api/activities")
@@ -46,19 +46,19 @@ public class ActivityController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','DOCTOR')")
     public Result<Activity> create(@Valid @RequestBody ActivityRequest request) {
         return Result.ok(activityService.create(request));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','DOCTOR')")
     public Result<Activity> update(@PathVariable Long id, @Valid @RequestBody ActivityRequest request) {
         return Result.ok(activityService.update(id, request));
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','DOCTOR')")
     public Result<Void> delete(@PathVariable Long id) {
         activityService.delete(id);
         return Result.ok();

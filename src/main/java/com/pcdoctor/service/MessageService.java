@@ -7,6 +7,7 @@ import com.pcdoctor.dto.MessageRequest;
 import com.pcdoctor.dto.MessageView;
 import com.pcdoctor.entity.Appointment;
 import com.pcdoctor.entity.AppointmentMessage;
+import com.pcdoctor.entity.Report;
 import com.pcdoctor.mapper.AppointmentMapper;
 import com.pcdoctor.mapper.MessageMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -25,12 +26,14 @@ public class MessageService {
     private final MessageMapper messageMapper;
     private final AppointmentMapper appointmentMapper;
     private final FileService fileService;
+    private final ReportService reportService;
 
     public MessageService(MessageMapper messageMapper, AppointmentMapper appointmentMapper,
-                          FileService fileService) {
+                          FileService fileService, ReportService reportService) {
         this.messageMapper = messageMapper;
         this.appointmentMapper = appointmentMapper;
         this.fileService = fileService;
+        this.reportService = reportService;
     }
 
     /** 留言列表（公开） */
@@ -71,6 +74,8 @@ public class MessageService {
             throw new BizException(ErrorCode.FORBIDDEN);
         }
         messageMapper.deleteById(messageId);
+        // 留言已不存在，相关举报一并置为已处理（只动待处理的），避免留下点进去报错的待处理项
+        reportService.autoHandleByTargets(Report.TYPE_MESSAGE, List.of(messageId), currentUser);
         TransactionAfterCommit.run(() -> fileService.deleteManaged(m.getPicture()));
         log.info("留言删除: appointmentId={}, messageId={}, operator={}", m.getAppointmentId(), messageId, currentUser);
     }

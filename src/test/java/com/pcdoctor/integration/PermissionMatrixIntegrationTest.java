@@ -112,6 +112,101 @@ class PermissionMatrixIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.code").value(0));
     }
 
+    @Test
+    @DisplayName("活动写：未登录 401 / 用户 403 / 电医 200（需求 2）/ 管理员 200")
+    void activityWriteMatrix() throws Exception {
+        prepareRoles();
+        String body = "{\"title\":\"matrix-activity\",\"summary\":\"s\",\"file\":\"/api/files/activity/x.md\"}";
+        mockMvc.perform(post("/api/activities").contentType("application/json").content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/activities").header("Authorization", "Bearer " + userToken)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/activities").header("Authorization", "Bearer " + doctorToken)
+                        .contentType("application/json").content(body))
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/api/activities").header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json").content(body))
+                .andExpect(jsonPath("$.code").value(0));
+    }
+
+    @Test
+    @DisplayName("改预约状态：未登录 401 / 用户 403 / 电医 403 / 管理员 200")
+    void adminAppointmentStatusMatrix() throws Exception {
+        prepareRoles();
+        String url = "/api/admin/appointments/" + appt + "/status";
+        String body = "{\"status\":1,\"doctor_id\":\"" + userIdOf(doctorToken) + "\"}";
+        mockMvc.perform(put(url).contentType("application/json").content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(put(url).header("Authorization", "Bearer " + userToken)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isForbidden());
+        // 电医不能走管理员通道改状态（他自己的入口是 accept/complete）
+        mockMvc.perform(put(url).header("Authorization", "Bearer " + doctorToken)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put(url).header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json").content(body))
+                .andExpect(jsonPath("$.code").value(0));
+    }
+
+    @Test
+    @DisplayName("站点文案写：未登录 401 / 用户 403 / 电医 403 / 管理员 200（需求 3）")
+    void siteContentPutMatrix() throws Exception {
+        prepareRoles();
+        String body = "{\"about_title\":\"matrix-title\"}";
+        mockMvc.perform(put("/api/config/site-content").contentType("application/json").content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(put("/api/config/site-content").header("Authorization", "Bearer " + userToken)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/config/site-content").header("Authorization", "Bearer " + doctorToken)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/config/site-content").header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json").content(body))
+                .andExpect(jsonPath("$.code").value(0));
+    }
+
+    @Test
+    @DisplayName("批量接口：未登录 401 / 用户 403 / 电医 403 / 管理员 200（6 个端点全覆盖）")
+    void batchEndpointsMatrix() throws Exception {
+        prepareRoles();
+        // 6 个批量端点各自的合法 body（管理员那一轮会真的执行，所以用不存在的 id 保证幂等无副作用）
+        String[][] cases = {
+                {"/api/admin/users/batch/delete", "{\"ids\":[\"nonexistent_u\"]}"},
+                {"/api/admin/users/batch/level", "{\"ids\":[\"nonexistent_u\"],\"level\":1}"},
+                {"/api/admin/appointments/batch/delete", "{\"ids\":[99999999]}"},
+                {"/api/admin/appointments/batch/status", "{\"ids\":[99999999],\"status\":0}"},
+                {"/api/admin/categories/batch/delete", "{\"ids\":[99999999]}"},
+                {"/api/admin/reports/batch/handle", "{\"ids\":[99999999]}"},
+        };
+        for (String[] c : cases) {
+            String url = c[0];
+            String body = c[1];
+            mockMvc.perform(post(url).contentType("application/json").content(body))
+                    .andExpect(status().isUnauthorized());
+            mockMvc.perform(post(url).header("Authorization", "Bearer " + userToken)
+                            .contentType("application/json").content(body))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post(url).header("Authorization", "Bearer " + doctorToken)
+                            .contentType("application/json").content(body))
+                    .andExpect(status().isForbidden());
+            // 管理员：业务码 0（不存在的 id 作为失败项返回，不影响鉴权断言）
+            mockMvc.perform(post(url).header("Authorization", "Bearer " + adminToken)
+                            .contentType("application/json").content(body))
+                    .andExpect(jsonPath("$.code").value(0));
+        }
+    }
+
+    @Test
+    @DisplayName("站点文案读：公开可读且返回问答数组")
+    void siteContentGetPublic() throws Exception {
+        mockMvc.perform(get("/api/config/site-content"))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.faqItems").isArray());
+    }
+
     private String userIdOf(String token) throws Exception {
         return objectMapper.readTree(mockMvc.perform(get("/api/auth/me")
                         .header("Authorization", "Bearer " + token))

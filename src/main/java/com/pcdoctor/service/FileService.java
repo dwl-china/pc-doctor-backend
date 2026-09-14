@@ -27,8 +27,8 @@ import java.util.UUID;
 @Service
 public class FileService {
 
-    /** 上传类型目录白名单（与契约 §4.10 一致） */
-    public static final Set<String> ALLOWED_TYPES = Set.of("avatar", "appointment", "doc", "activity", "message");
+    /** 上传类型目录白名单（与契约 §4.10 一致）。notice = 站点公告类图片（如交流群二维码） */
+    public static final Set<String> ALLOWED_TYPES = Set.of("avatar", "appointment", "doc", "activity", "message", "notice");
 
     /** 扩展名 → MIME（下载时 Content-Type） */
     private static final Map<String, String> EXT_MIME = Map.of(

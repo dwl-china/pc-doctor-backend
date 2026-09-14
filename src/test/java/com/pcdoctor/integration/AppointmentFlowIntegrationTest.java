@@ -1,10 +1,14 @@
 package com.pcdoctor.integration;
 
 import com.pcdoctor.BaseIntegrationTest;
+import com.pcdoctor.entity.Appointment;
+import com.pcdoctor.mapper.AppointmentMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MvcResult;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -16,6 +20,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 预约闭环与权限（#5.2、#9、#6.2）。
  */
 class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
+
+    /** 管理员改状态的"清空"语义只能查 DB 验证（响应里 null 字段被序列化器省略） */
+    @Autowired
+    AppointmentMapper appointmentMapper;
 
     @Test
     @DisplayName("全流程：提交→接单→完成→留言，状态机与时间戳正确")
@@ -179,6 +187,154 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
         String other = register(nextUserId("pico"));
         mockMvc.perform(get("/api/appointments/" + appt).header("Authorization", "Bearer " + other))
                 .andExpect(jsonPath("$.data.problemPicture").doesNotExist());
+    }
+
+    // ------------------------------------------------------------------
+    // 管理员改状态（契约 §4.3）
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("管理员派单：排队单 0→1，写入电医与接单时间")
+    void adminAssignDoctorOnQueued() throws Exception {
+        String adminToken = adminToken();
+        String u = register(nextUserId("au"));
+        String d = register(nextUserId("ad"));
+        promoteToDoctor(adminToken, userIdOf(d));
+        long appt = submitAppointment(u, "need a doctor", 1L);
+
+        mockMvc.perform(put("/api/admin/appointments/" + appt + "/status")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json")
+                        .content("{\"status\":1,\"doctor_id\":\"" + userIdOf(d) + "\"}"))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value(1))
+                .andExpect(jsonPath("$.data.doctorId").value(userIdOf(d)))
+                .andExpect(jsonPath("$.data.appointmentTime").isNotEmpty());
+
+        Appointment db = appointmentMapper.selectById(appt);
+        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_PROCESSING);
+        assertThat(db.getDoctorId()).isEqualTo(userIdOf(d));
+        assertThat(db.getAppointmentTime()).isNotNull();
+        assertThat(db.getDoneTime()).isNull();
+    }
+
+    @Test
+    @DisplayName("管理员退回排队：接单电医与两个时间戳三列全部清空，且其他电医可重新接单")
+    void adminRevertToQueuedClearsAll() throws Exception {
+        String adminToken = adminToken();
+        String u = register(nextUserId("ru"));
+        String d1 = register(nextUserId("rd1"));
+        String d2 = register(nextUserId("rd2"));
+        promoteToDoctor(adminToken, userIdOf(d1));
+        promoteToDoctor(adminToken, userIdOf(d2));
+        long appt = submitAppointment(u, "revert me", 1L);
+        mockMvc.perform(post("/api/appointments/" + appt + "/accept")
+                .header("Authorization", "Bearer " + d1));
+
+        mockMvc.perform(put("/api/admin/appointments/" + appt + "/status")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json")
+                        .content("{\"status\":0}"))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value(0))
+                // 后端 non_null 序列化：null 字段整个省略
+                .andExpect(jsonPath("$.data.doctorId").doesNotExist())
+                .andExpect(jsonPath("$.data.appointmentTime").doesNotExist())
+                .andExpect(jsonPath("$.data.doneTime").doesNotExist());
+
+        // MyBatis-Plus 默认不更新 null，清空效果必须查 DB 才算数
+        Appointment db = appointmentMapper.selectById(appt);
+        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_QUEUED);
+        assertThat(db.getDoctorId()).isNull();
+        assertThat(db.getAppointmentTime()).isNull();
+        assertThat(db.getDoneTime()).isNull();
+
+        // 行为证明：确实回到了排队，另一个电医能接走
+        mockMvc.perform(post("/api/appointments/" + appt + "/accept")
+                        .header("Authorization", "Bearer " + d2))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.doctorId").value(userIdOf(d2)));
+    }
+
+    @Test
+    @DisplayName("管理员完成：1→2 补完成时间，接单电医不变")
+    void adminCompleteForOtherDoctor() throws Exception {
+        String adminToken = adminToken();
+        String u = register(nextUserId("cu"));
+        String d = register(nextUserId("cd"));
+        promoteToDoctor(adminToken, userIdOf(d));
+        long appt = submitAppointment(u, "complete me", 1L);
+        mockMvc.perform(post("/api/appointments/" + appt + "/accept")
+                .header("Authorization", "Bearer " + d));
+        Appointment before = appointmentMapper.selectById(appt);
+
+        mockMvc.perform(put("/api/admin/appointments/" + appt + "/status")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json")
+                        .content("{\"status\":2}"))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value(2))
+                .andExpect(jsonPath("$.data.doneTime").isNotEmpty());
+
+        Appointment db = appointmentMapper.selectById(appt);
+        assertThat(db.getDoneTime()).isNotNull();
+        assertThat(db.getDoctorId()).isEqualTo(userIdOf(d));
+        assertThat(db.getAppointmentTime()).isEqualTo(before.getAppointmentTime());
+    }
+
+    @Test
+    @DisplayName("管理员把已完成退回处理中：清空完成时间，接单信息保留")
+    void adminProcessFromDoneClearsDoneTime() throws Exception {
+        String adminToken = adminToken();
+        String u = register(nextUserId("pu"));
+        String d = register(nextUserId("pd"));
+        promoteToDoctor(adminToken, userIdOf(d));
+        long appt = submitAppointment(u, "reopen me", 1L);
+        mockMvc.perform(post("/api/appointments/" + appt + "/accept")
+                .header("Authorization", "Bearer " + d));
+        mockMvc.perform(post("/api/appointments/" + appt + "/complete")
+                .header("Authorization", "Bearer " + d));
+        assertThat(appointmentMapper.selectById(appt).getDoneTime()).isNotNull();
+
+        mockMvc.perform(put("/api/admin/appointments/" + appt + "/status")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json")
+                        .content("{\"status\":1}"))
+                .andExpect(jsonPath("$.code").value(0));
+
+        Appointment db = appointmentMapper.selectById(appt);
+        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_PROCESSING);
+        assertThat(db.getDoneTime()).isNull();
+        assertThat(db.getDoctorId()).isEqualTo(userIdOf(d));
+    }
+
+    @Test
+    @DisplayName("管理员改状态：指派的不是电医 → 2001 且库中数据不变")
+    void adminSetStatusBadDoctor() throws Exception {
+        String adminToken = adminToken();
+        String u = register(nextUserId("bu"));
+        String plain = register(nextUserId("bp"));   // 普通用户，不是电医
+        long appt = submitAppointment(u, "bad doctor", 1L);
+
+        mockMvc.perform(put("/api/admin/appointments/" + appt + "/status")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json")
+                        .content("{\"status\":1,\"doctor_id\":\"" + userIdOf(plain) + "\"}"))
+                .andExpect(jsonPath("$.code").value(2001));
+
+        Appointment db = appointmentMapper.selectById(appt);
+        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_QUEUED);
+        assertThat(db.getDoctorId()).isNull();
+    }
+
+    @Test
+    @DisplayName("管理员改状态：预约不存在 → 3001")
+    void adminSetStatusNotFound() throws Exception {
+        mockMvc.perform(put("/api/admin/appointments/99999999/status")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType("application/json")
+                        .content("{\"status\":0}"))
+                .andExpect(jsonPath("$.code").value(3001));
     }
 
     /** 带图片提交预约（图片 URL 为占位符，不实际落盘） */

@@ -6,6 +6,7 @@ import com.pcdoctor.dto.ChangePasswordRequest;
 import com.pcdoctor.entity.User;
 import com.pcdoctor.mapper.AppointmentMapper;
 import com.pcdoctor.mapper.MessageMapper;
+import com.pcdoctor.mapper.ReportMapper;
 import com.pcdoctor.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,6 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -35,6 +37,8 @@ class UserServiceTest {
     @Mock
     MessageMapper messageMapper;
     @Mock
+    ReportMapper reportMapper;
+    @Mock
     FileService fileService;
 
     PasswordEncoder encoder = new BCryptPasswordEncoder();
@@ -42,7 +46,7 @@ class UserServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new UserService(userMapper, appointmentMapper, messageMapper, encoder, fileService);
+        service = new UserService(userMapper, appointmentMapper, messageMapper, reportMapper, encoder, fileService);
     }
 
     private User userWithHash(String hash) {
@@ -117,6 +121,29 @@ class UserServiceTest {
         assertThatThrownBy(() -> service.adminDelete("u1", "admin"))
                 .isInstanceOfSatisfying(BizException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_STATUS));
+    }
+
+    @Test
+    @DisplayName("有举报记录的用户禁止删除（回归：漏检 fk_report_reporter 会撞外键 → 500）")
+    void adminDeleteWithReports() {
+        when(userMapper.selectById("u2")).thenReturn(userWithHash("x"));
+        when(appointmentMapper.selectCount(any())).thenReturn(0L);
+        when(messageMapper.selectCount(any())).thenReturn(0L);
+        when(reportMapper.selectCount(any())).thenReturn(2L);
+        assertThatThrownBy(() -> service.adminDelete("u2", "admin"))
+                .isInstanceOfSatisfying(BizException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_STATUS));
+    }
+
+    @Test
+    @DisplayName("三种引用都为空时可正常删除")
+    void adminDeleteOk() {
+        when(userMapper.selectById("u3")).thenReturn(userWithHash("x"));
+        when(appointmentMapper.selectCount(any())).thenReturn(0L);
+        when(messageMapper.selectCount(any())).thenReturn(0L);
+        when(reportMapper.selectCount(any())).thenReturn(0L);
+        service.adminDelete("u3", "admin");
+        verify(userMapper).deleteById("u3");
     }
 
     @Test

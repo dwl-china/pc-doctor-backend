@@ -12,9 +12,11 @@ import com.pcdoctor.dto.UpdateProfileRequest;
 import com.pcdoctor.dto.UserView;
 import com.pcdoctor.entity.Appointment;
 import com.pcdoctor.entity.AppointmentMessage;
+import com.pcdoctor.entity.Report;
 import com.pcdoctor.entity.User;
 import com.pcdoctor.mapper.AppointmentMapper;
 import com.pcdoctor.mapper.MessageMapper;
+import com.pcdoctor.mapper.ReportMapper;
 import com.pcdoctor.mapper.UserMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -49,14 +51,16 @@ public class UserService {
     private final UserMapper userMapper;
     private final AppointmentMapper appointmentMapper;
     private final MessageMapper messageMapper;
+    private final ReportMapper reportMapper;
     private final PasswordEncoder passwordEncoder;
     private final FileService fileService;
 
     public UserService(UserMapper userMapper, AppointmentMapper appointmentMapper,
-                       MessageMapper messageMapper, PasswordEncoder passwordEncoder,
-                       FileService fileService) {
+                       MessageMapper messageMapper, ReportMapper reportMapper,
+                       PasswordEncoder passwordEncoder, FileService fileService) {
         this.userMapper = userMapper;
         this.appointmentMapper = appointmentMapper;
+        this.reportMapper = reportMapper;
         this.messageMapper = messageMapper;
         this.passwordEncoder = passwordEncoder;
         this.fileService = fileService;
@@ -145,9 +149,20 @@ public class UserService {
 
     // ---------- 管理员操作 ----------
 
-    /** 用户列表：按账号/昵称模糊搜索 + 角色筛选 */
-    public PageView<UserView> adminList(int page, int size, String userId, String userName, Integer level) {
+    /**
+     * 用户列表：搜索 + 角色筛选。
+     *
+     * <p>{@code userId} / {@code userName} 是精确到字段的筛选，多个条件之间**取交集**；
+     * {@code keyword} 是管理端搜索框用的「账号**或**昵称」模糊匹配。
+     * 两者混用会把用户名搜索变成"账号和昵称都得含该串"，几乎搜不出东西 —— 管理端只用 keyword。
+     */
+    public PageView<UserView> adminList(int page, int size, String userId, String userName,
+                                        String keyword, Integer level) {
         LambdaQueryWrapper<User> qw = new LambdaQueryWrapper<>();
+        if (keyword != null && !keyword.isBlank()) {
+            String kw = keyword.trim();
+            qw.and(w -> w.like(User::getUserId, kw).or().like(User::getUserName, kw));
+        }
         if (userId != null && !userId.isBlank()) {
             qw.like(User::getUserId, userId);
         }
@@ -202,7 +217,13 @@ public class UserService {
         return profile(id);
     }
 
-    /** 删除用户：禁止删自己；有预约/留言记录的禁止删除（外键引用） */
+    /**
+     * 删除用户：禁止删自己；有预约/留言/举报记录的禁止删除。
+     *
+     * <p>三种引用都要查：user_table 被 appointment（user_id / doctor_id）、message（user_id）、
+     * report（reporter_id，fk_report_reporter）三处外键引用。漏查任何一种，删除都会撞约束
+     * 抛 DataIntegrityViolationException → 500 而不是可读的 2003。
+     */
     @Transactional
     public void adminDelete(String id, String operatorId) {
         if (id.equals(operatorId)) {
@@ -215,8 +236,10 @@ public class UserService {
                 .eq(Appointment::getDoctorId, id));
         Long messages = messageMapper.selectCount(new LambdaQueryWrapper<AppointmentMessage>()
                 .eq(AppointmentMessage::getUserId, id));
-        if (appointments > 0 || messages > 0) {
-            throw new BizException(ErrorCode.INVALID_STATUS, "该用户存在预约/留言记录，无法删除");
+        Long reports = reportMapper.selectCount(new LambdaQueryWrapper<Report>()
+                .eq(Report::getReporterId, id));
+        if (appointments > 0 || messages > 0 || reports > 0) {
+            throw new BizException(ErrorCode.INVALID_STATUS, "该用户存在预约/留言/举报记录，无法删除");
         }
         userMapper.deleteById(id);
         log.info("管理员删除用户: id={}, operator={}", id, operatorId);

@@ -60,14 +60,17 @@ public class ActivityService {
         update.setFile(request.file());
         update.setCover(request.cover());
         activityMapper.updateById(update);
-        // 换文件/封面后清理旧文件
+        // 换文件/封面后清理旧文件。
+        // 封面是可选字段：客户端不传时 MyBatis-Plus 不会更新该列（DB 保留旧值），
+        // 所以只有"确实传了新封面且与旧值不同"才能删旧文件，否则会删掉仍在被引用的文件。
         String oldFile = a.getFile();
         String oldCover = a.getCover();
+        String newCover = request.cover();
         TransactionAfterCommit.run(() -> {
             if (oldFile != null && !oldFile.equals(request.file())) {
                 fileService.deleteManaged(oldFile);
             }
-            if (oldCover != null && !oldCover.equals(request.cover())) {
+            if (oldCover != null && newCover != null && !newCover.isBlank() && !oldCover.equals(newCover)) {
                 fileService.deleteManaged(oldCover);
             }
         });
