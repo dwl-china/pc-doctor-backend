@@ -103,6 +103,40 @@ class SiteContentIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisplayName("页脚 HTML：备案号链接保存后可读回，且能清空")
+    void footerHtmlRoundTrip() throws Exception {
+        String admin = adminToken();
+        String footer = "<a href=\"https://icp.gov.moe/?keyword=20261911\" target=\"_blank\">萌ICP备20261911号</a>";
+
+        mockMvc.perform(put("/api/config/site-content")
+                        .header("Authorization", "Bearer " + admin)
+                        .contentType("application/json")
+                        .content("{\"footer_html\":" + objectMapper.writeValueAsString(footer) + "}"))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.footerHtml").value(footer));
+
+        mockMvc.perform(get("/api/config/site-content"))
+                .andExpect(jsonPath("$.data.footerHtml").value(footer));
+
+        // 传空串清空
+        mockMvc.perform(put("/api/config/site-content")
+                        .header("Authorization", "Bearer " + admin)
+                        .contentType("application/json")
+                        .content("{\"footer_html\":\"\"}"))
+                .andExpect(jsonPath("$.data.footerHtml").value(""));
+    }
+
+    @Test
+    @DisplayName("页脚 HTML：超长（>1000 字）→ 2001")
+    void footerHtmlTooLong() throws Exception {
+        mockMvc.perform(put("/api/config/site-content")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType("application/json")
+                        .content("{\"footer_html\":\"" + "x".repeat(1001) + "\"}"))
+                .andExpect(jsonPath("$.code").value(2001));
+    }
+
+    @Test
     @DisplayName("问答超限（>15 条）→ 2001 参数校验")
     void faqTooManyItems() throws Exception {
         StringBuilder items = new StringBuilder();

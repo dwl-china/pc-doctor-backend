@@ -12,5 +12,7 @@ public record SiteContentView(
         String aboutBody,
         List<FaqItem> faqItems,
         String qqNotice,
-        String qqQrcode) {
+        String qqQrcode,
+        // 页脚自定义 HTML（备案号等）；由前端消毒后渲染，服务端只做长度校验
+        String footerHtml) {
 }

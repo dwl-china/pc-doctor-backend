@@ -97,7 +97,7 @@ class ConfigServiceTest {
     @DisplayName("更新：只写传入的字段，未传的字段不落库")
     void updateWritesOnlyProvidedFields() {
         service.updateSiteContent(new com.pcdoctor.dto.SiteContentRequest(
-                "新标题", null, null, null, null));
+                "新标题", null, null, null, null, null));
 
         // 只有一次写入，且就是传入的那个 key（其余 4 个 key 不该被碰）
         ArgumentCaptor<Config> captor = ArgumentCaptor.forClass(Config.class);
@@ -113,7 +113,7 @@ class ConfigServiceTest {
                 config(ConfigService.KEY_QQ_QRCODE, "/api/files/notice/old.png")));
 
         service.updateSiteContent(new com.pcdoctor.dto.SiteContentRequest(
-                null, null, null, null, "/api/files/notice/new.png"));
+                null, null, null, null, "/api/files/notice/new.png", null));
 
         verify(fileService).deleteManaged("/api/files/notice/old.png");
     }
@@ -125,7 +125,7 @@ class ConfigServiceTest {
                 config(ConfigService.KEY_QQ_QRCODE, "/api/files/notice/old.png")));
 
         service.updateSiteContent(new com.pcdoctor.dto.SiteContentRequest(
-                null, null, null, null, ""));
+                null, null, null, null, "", null));
 
         verify(fileService).deleteManaged("/api/files/notice/old.png");
     }
@@ -134,7 +134,7 @@ class ConfigServiceTest {
     @DisplayName("未传二维码：不动文件也不写库")
     void untouchedQrcodeKeepsFile() {
         service.updateSiteContent(new com.pcdoctor.dto.SiteContentRequest(
-                null, null, null, null, null));
+                null, null, null, null, null, null));
 
         verify(fileService, never()).deleteManaged(any());
         verify(configMapper, never()).insert(any(Config.class));

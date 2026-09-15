@@ -41,8 +41,11 @@ public class ConfigService {
     public static final String KEY_QQ_NOTICE = "qq_notice";
     public static final String KEY_QQ_QRCODE = "qq_qrcode";
 
+    /** 页脚自定义 HTML（备案号等，管理员粘贴、前端消毒后渲染） */
+    public static final String KEY_FOOTER_HTML = "footer_html";
+
     private static final List<String> SITE_KEYS = List.of(
-            KEY_ABOUT_TITLE, KEY_ABOUT_BODY, KEY_FAQ_ITEMS, KEY_QQ_NOTICE, KEY_QQ_QRCODE);
+            KEY_ABOUT_TITLE, KEY_ABOUT_BODY, KEY_FAQ_ITEMS, KEY_QQ_NOTICE, KEY_QQ_QRCODE, KEY_FOOTER_HTML);
 
     private final ConfigMapper configMapper;
     private final FileService fileService;
@@ -90,7 +93,8 @@ public class ConfigService {
                 values.getOrDefault(KEY_ABOUT_BODY, ""),
                 parseFaq(values.get(KEY_FAQ_ITEMS)),
                 values.getOrDefault(KEY_QQ_NOTICE, ""),
-                values.getOrDefault(KEY_QQ_QRCODE, ""));
+                values.getOrDefault(KEY_QQ_QRCODE, ""),
+                values.getOrDefault(KEY_FOOTER_HTML, ""));
     }
 
     /**
@@ -112,6 +116,9 @@ public class ConfigService {
         }
         if (request.qqNotice() != null) {
             set(KEY_QQ_NOTICE, request.qqNotice());
+        }
+        if (request.footerHtml() != null) {
+            set(KEY_FOOTER_HTML, request.footerHtml());
         }
         if (request.qqQrcode() != null) {
             String old = loadValues(List.of(KEY_QQ_QRCODE)).getOrDefault(KEY_QQ_QRCODE, "");
