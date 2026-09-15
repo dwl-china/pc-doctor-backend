@@ -14,8 +14,10 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -97,9 +99,9 @@ class ConfigServiceTest {
     @DisplayName("更新：只写传入的字段，未传的字段不落库")
     void updateWritesOnlyProvidedFields() {
         service.updateSiteContent(new com.pcdoctor.dto.SiteContentRequest(
-                "新标题", null, null, null, null, null));
+                "新标题", null, null, null, null, null, null));
 
-        // 只有一次写入，且就是传入的那个 key（其余 4 个 key 不该被碰）
+        // 只有一次写入，且就是传入的那个 key（其余 key 不该被碰）
         ArgumentCaptor<Config> captor = ArgumentCaptor.forClass(Config.class);
         verify(configMapper).insert(captor.capture());
         assertThat(captor.getValue().getConfigKey()).isEqualTo(ConfigService.KEY_ABOUT_TITLE);
@@ -113,7 +115,7 @@ class ConfigServiceTest {
                 config(ConfigService.KEY_QQ_QRCODE, "/api/files/notice/old.png")));
 
         service.updateSiteContent(new com.pcdoctor.dto.SiteContentRequest(
-                null, null, null, null, "/api/files/notice/new.png", null));
+                null, null, null, null, "/api/files/notice/new.png", null, null));
 
         verify(fileService).deleteManaged("/api/files/notice/old.png");
     }
@@ -125,7 +127,7 @@ class ConfigServiceTest {
                 config(ConfigService.KEY_QQ_QRCODE, "/api/files/notice/old.png")));
 
         service.updateSiteContent(new com.pcdoctor.dto.SiteContentRequest(
-                null, null, null, null, "", null));
+                null, null, null, null, "", null, null));
 
         verify(fileService).deleteManaged("/api/files/notice/old.png");
     }
@@ -134,10 +136,41 @@ class ConfigServiceTest {
     @DisplayName("未传二维码：不动文件也不写库")
     void untouchedQrcodeKeepsFile() {
         service.updateSiteContent(new com.pcdoctor.dto.SiteContentRequest(
-                null, null, null, null, null, null));
+                null, null, null, null, null, null, null));
 
         verify(fileService, never()).deleteManaged(any());
         verify(configMapper, never()).insert(any(Config.class));
+    }
+
+    @Test
+    @DisplayName("备案号与页脚是两个独立 key：改备案号不碰页脚，反之亦然")
+    void icpAndFooterAreIndependent() {
+        // 先只改备案号，再只改页脚
+        service.updateSiteContent(new com.pcdoctor.dto.SiteContentRequest(
+                null, null, null, null, null, null, "<a href=\"https://beian.miit.gov.cn/\">浙ICP备1号</a>"));
+        service.updateSiteContent(new com.pcdoctor.dto.SiteContentRequest(
+                null, null, null, null, null, "页脚内容", null));
+
+        // 两次写入各自只命中自己的 key —— 若哪天有人把两个字段合并回一个 key，这条会红
+        ArgumentCaptor<Config> captor = ArgumentCaptor.forClass(Config.class);
+        verify(configMapper, times(2)).insert(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(Config::getConfigKey, Config::getConfigValue)
+                .containsExactly(
+                        tuple(ConfigService.KEY_ICP_HTML, "<a href=\"https://beian.miit.gov.cn/\">浙ICP备1号</a>"),
+                        tuple(ConfigService.KEY_FOOTER_HTML, "页脚内容"));
+    }
+
+    @Test
+    @DisplayName("读取：备案号缺失回落空串，不影响其它字段")
+    void missingIcpFallsBackToEmpty() {
+        when(configMapper.selectList(any())).thenReturn(List.of(
+                config(ConfigService.KEY_FOOTER_HTML, "页脚内容")));
+
+        var view = service.getSiteContent();
+
+        assertThat(view.icpHtml()).isEmpty();
+        assertThat(view.footerHtml()).isEqualTo("页脚内容");
     }
 
     private Config config(String key, String value) {

@@ -255,15 +255,29 @@ status 语义：`0` 排队中 / `1` 处理中 / `2` 已完成。
   "aboutBody": "Markdown 正文",
   "faqItems": [{ "question": "如何提交预约？", "answer": "Markdown 答案" }],
   "qqNotice": "欢迎加入电脑医院交流群：**{qq_group}**",
-  "qqQrcode": "/api/files/notice/xxx.png"
+  "qqQrcode": "/api/files/notice/xxx.png",
+  "footerHtml": "<a href=\"https://icp.gov.moe/?keyword=20261911\" target=\"_blank\">萌ICP备20261911号</a>",
+  "icpHtml": "<a href=\"https://beian.miit.gov.cn/\" target=\"_blank\">浙ICP备XXXXXXXX号</a>"
 }
 ```
 
 > - `aboutBody` / `faqItems[].answer` / `qqNotice` 支持 Markdown，前端渲染前经 DOMPurify 消毒
 > - `{qq_group}` 占位符在渲染时替换为真实群号，避免群号变更后文案里留下死值
 > - PUT **三态语义**：字段不传 = 保留原值，传空串 = 清空（`qq_qrcode` 清空会连带删除旧文件），传值 = 替换；`faq_items` 传 `[]` 表示清空全部问答
-> - 长度上限：`about_title` 100、`about_body` 5000、`qq_notice` 500、`qq_qrcode` 500、`faq_items` ≤ 15 条，每条 question 100 / answer 1000
+> - 长度上限：`about_title` 100、`about_body` 5000、`qq_notice` 500、`qq_qrcode` 500、`footer_html` / `icp_html` 各 1000、`faq_items` ≤ 15 条，每条 question 100 / answer 1000
 > - 缺失的 key 一律回落为空串（不会因某段文案没配就把整页打成错误）
+>
+> **页脚区域的两个 HTML 字段**（服务端只校验长度，不做 HTML 解析）：
+>
+> | 字段 | 渲染位置 | 说明 |
+> |---|---|---|
+> | `icp_html` | 页脚**上方独立一行**（全宽） | 备案号。单独一个字段是为了能只改备案号而不动页脚 |
+> | `footer_html` | 页脚信息**同一行**（站名 / 交流群之后） | 自定义页脚内容 |
+>
+> - 两者**互不影响**：只传其中一个，另一个原样保留（见 `SiteContentIntegrationTest#icpAndFooterAreIndependent`）
+> - 都是粘贴进来的 HTML **片段**，前端按白名单（`a` `span` `br` `b` `strong` `i` `em` `p` + `href` `target` `rel` `title`）消毒后 `v-html` 渲染；`<script>`、事件属性（`onerror=` 等）、`javascript:` 伪协议一律剥掉且不执行
+> - `target="_blank"` 的链接会自动补 `rel="noopener noreferrer"`（防 tabnabbing）
+> - 两个字段都为空时页脚只剩站名与交流群，不出现空行
 
 ### 4.10 文件 files
 

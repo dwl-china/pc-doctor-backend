@@ -127,6 +127,52 @@ class SiteContentIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisplayName("备案号与页脚互不干扰：改一个，另一个原样保留")
+    void icpAndFooterAreIndependent() throws Exception {
+        String admin = adminToken();
+        String footer = "<a href=\"https://icp.gov.moe/?keyword=20261911\" target=\"_blank\">萌ICP备20261911号</a>";
+        String icp = "<a href=\"https://beian.miit.gov.cn/\" target=\"_blank\">浙ICP备20261911号</a>";
+
+        // 先只写页脚（模拟线上现状：页脚有内容、备案号还空着）
+        mockMvc.perform(put("/api/config/site-content")
+                        .header("Authorization", "Bearer " + admin)
+                        .contentType("application/json")
+                        .content("{\"footer_html\":" + objectMapper.writeValueAsString(footer) + "}"))
+                .andExpect(jsonPath("$.data.footerHtml").value(footer))
+                .andExpect(jsonPath("$.data.icpHtml").value(""));
+
+        // 再只写备案号 —— 页脚必须一字不动（这正是拆成两个 key 的理由）
+        mockMvc.perform(put("/api/config/site-content")
+                        .header("Authorization", "Bearer " + admin)
+                        .contentType("application/json")
+                        .content("{\"icp_html\":" + objectMapper.writeValueAsString(icp) + "}"))
+                .andExpect(jsonPath("$.data.icpHtml").value(icp))
+                .andExpect(jsonPath("$.data.footerHtml").value(footer));
+
+        mockMvc.perform(get("/api/config/site-content"))
+                .andExpect(jsonPath("$.data.icpHtml").value(icp))
+                .andExpect(jsonPath("$.data.footerHtml").value(footer));
+
+        // 清空备案号：页脚仍在
+        mockMvc.perform(put("/api/config/site-content")
+                        .header("Authorization", "Bearer " + admin)
+                        .contentType("application/json")
+                        .content("{\"icp_html\":\"\"}"))
+                .andExpect(jsonPath("$.data.icpHtml").value(""))
+                .andExpect(jsonPath("$.data.footerHtml").value(footer));
+    }
+
+    @Test
+    @DisplayName("备案号：超长（>1000 字）→ 2001")
+    void icpHtmlTooLong() throws Exception {
+        mockMvc.perform(put("/api/config/site-content")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType("application/json")
+                        .content("{\"icp_html\":\"" + "x".repeat(1001) + "\"}"))
+                .andExpect(jsonPath("$.code").value(2001));
+    }
+
+    @Test
     @DisplayName("页脚 HTML：超长（>1000 字）→ 2001")
     void footerHtmlTooLong() throws Exception {
         mockMvc.perform(put("/api/config/site-content")

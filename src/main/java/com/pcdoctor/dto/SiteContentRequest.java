@@ -46,11 +46,20 @@ public record SiteContentRequest(
         String qqQrcode,
 
         /**
-         * 页脚自定义 HTML（备案号等）。
+         * 页脚自定义 HTML。
          * 前端渲染前会经 DOMPurify 消毒（只放行 a/span/br 等少量标签），
          * 服务端不做 HTML 解析，只限制长度，避免把校验逻辑分散在两处。
          */
         @JsonProperty("footer_html")
         @Size(max = 1000, message = "页脚内容最长 1000 字")
-        String footerHtml) {
+        String footerHtml,
+
+        /**
+         * 备案号 HTML，渲染在页脚上方独立一行。
+         * 与 {@code footer_html} 同样消毒、同样长度上限 —— 它就是「换个位置显示的页脚片段」，
+         * 单独一个字段只为了能只改备案号而不动页脚。
+         */
+        @JsonProperty("icp_html")
+        @Size(max = 1000, message = "备案号内容最长 1000 字")
+        String icpHtml) {
 }
