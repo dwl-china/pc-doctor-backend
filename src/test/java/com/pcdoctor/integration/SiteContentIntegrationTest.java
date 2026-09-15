@@ -22,7 +22,8 @@ class SiteContentIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.data.aboutTitle").value("关于我们"))
                 .andExpect(jsonPath("$.data.aboutBody").isNotEmpty())
                 .andExpect(jsonPath("$.data.faqItems.length()").value(7))
-                .andExpect(jsonPath("$.data.faqItems[0].question").value("电脑医院是什么？"))
+                // 文案由 V5 种子 → V6 中性化（去掉学校/社团名，与备案名一致）
+                .andExpect(jsonPath("$.data.faqItems[0].question").value("电脑硬件笔记是什么？"))
                 .andExpect(jsonPath("$.data.faqItems[6].answer").isNotEmpty());
     }
 
