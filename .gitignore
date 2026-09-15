@@ -43,3 +43,6 @@ application-local.yml
 # logs
 logs/
 *.log
+
+# macOS
+.DS_Store
