@@ -1,5 +1,8 @@
 package com.pcdoctor.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.MybatisMapperBuilderAssistant;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.pcdoctor.entity.Config;
 import com.pcdoctor.mapper.ConfigMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +44,9 @@ class ConfigServiceTest {
     @BeforeEach
     void setUp() {
         service = new ConfigService(configMapper, fileService, MAPPER);
+        // 纯 Mockito 环境无 Spring 上下文，MyBatis-Plus 的 Lambda 包装器依赖 TableInfo 缓存，
+        // 需显式预热；否则 CI 上测试类执行顺序不同会抛 "can not find lambda cache"
+        TableInfoHelper.initTableInfo(new MybatisMapperBuilderAssistant(new MybatisConfiguration(), ""), Config.class);
     }
 
     @Test
