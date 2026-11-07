@@ -38,6 +38,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * 预约状态机与权限规则（#5.2、#9、#6.1）。
+ *
+ * <p>2026-11 起只有两态：0 待处理 / 2 已处理，接单即完成。
  */
 @ExtendWith(MockitoExtension.class)
 class AppointmentServiceTest {
@@ -58,7 +60,7 @@ class AppointmentServiceTest {
     AppointmentService service;
 
     Appointment queued;
-    Appointment processing;
+    Appointment accepted;
     Appointment done;
 
     @BeforeEach
@@ -70,7 +72,7 @@ class AppointmentServiceTest {
         TableInfoHelper.initTableInfo(new MybatisMapperBuilderAssistant(new MybatisConfiguration(), ""), Appointment.class);
         TableInfoHelper.initTableInfo(new MybatisMapperBuilderAssistant(new MybatisConfiguration(), ""), AppointmentMessage.class);
         queued = appointment(1L, "u1", Appointment.STATUS_QUEUED, null);
-        processing = appointment(2L, "u1", Appointment.STATUS_PROCESSING, "doc1");
+        accepted = appointment(2L, "u1", Appointment.STATUS_DONE, "doc1");
         done = appointment(3L, "u1", Appointment.STATUS_DONE, "doc1");
         lenient().when(userMapper.selectById("u1")).thenReturn(user("u1", "user1"));
         // doc1 必须是 level=1（管理员改状态要校验目标账号确实是电医）
@@ -82,25 +84,28 @@ class AppointmentServiceTest {
     }
 
     @Nested
-    @DisplayName("接单状态机")
+    @DisplayName("接单（0→2，接单即完成）")
     class Accept {
 
         @Test
-        @DisplayName("排队单接单成功，写入电医与接单时间")
+        @DisplayName("待处理单接单成功：写入电医、接单时间与完成时间")
         void acceptQueued() {
             when(appointmentMapper.update(any(), any())).thenReturn(1);
-            when(appointmentMapper.selectById(1L)).thenReturn(processing);
+            when(appointmentMapper.selectById(1L)).thenReturn(accepted);
             var view = service.accept(1L, "doc1");
-            assertThat(view.status()).isEqualTo(Appointment.STATUS_PROCESSING);
+            assertThat(view.status()).isEqualTo(Appointment.STATUS_DONE);
             assertThat(view.doctorId()).isEqualTo("doc1");
+            assertThat(captureUpdateSet())
+                    .contains("status").contains("doctor_id")
+                    .contains("appointment_time").contains("done_time");
         }
 
         @Test
         @DisplayName("已被接单的单再抢单 → INVALID_STATUS")
         void acceptConflict() {
             when(appointmentMapper.update(any(), any())).thenReturn(0);
-            when(appointmentMapper.selectById(1L)).thenReturn(processing);
-            assertThatThrownBy(() -> service.accept(1L, "doc2"))
+            when(appointmentMapper.selectById(2L)).thenReturn(accepted);
+            assertThatThrownBy(() -> service.accept(2L, "doc2"))
                     .isInstanceOfSatisfying(BizException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_STATUS));
         }
@@ -117,45 +122,11 @@ class AppointmentServiceTest {
     }
 
     @Nested
-    @DisplayName("完成状态机")
-    class Complete {
-
-        @Test
-        @DisplayName("接单者本人完成 1→2 成功")
-        void completeByDoctor() {
-            when(appointmentMapper.update(any(), any())).thenReturn(1);
-            when(appointmentMapper.selectById(2L)).thenReturn(done);
-            var view = service.complete(2L, "doc1");
-            assertThat(view.status()).isEqualTo(Appointment.STATUS_DONE);
-        }
-
-        @Test
-        @DisplayName("非接单者完成 → APPOINTMENT_OWNERSHIP")
-        void completeByOtherDoctor() {
-            when(appointmentMapper.update(any(), any())).thenReturn(0);
-            when(appointmentMapper.selectById(2L)).thenReturn(processing);
-            assertThatThrownBy(() -> service.complete(2L, "doc2"))
-                    .isInstanceOfSatisfying(BizException.class,
-                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.APPOINTMENT_OWNERSHIP));
-        }
-
-        @Test
-        @DisplayName("已完成单重复完成 → INVALID_STATUS")
-        void completeDone() {
-            when(appointmentMapper.update(any(), any())).thenReturn(0);
-            when(appointmentMapper.selectById(3L)).thenReturn(done);
-            assertThatThrownBy(() -> service.complete(3L, "doc1"))
-                    .isInstanceOfSatisfying(BizException.class,
-                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_STATUS));
-        }
-    }
-
-    @Nested
     @DisplayName("更新权限")
     class Update {
 
         @Test
-        @DisplayName("本人改未接单单 → 成功")
+        @DisplayName("本人改待处理且未接单的单 → 成功")
         void ownerUpdateQueued() {
             when(appointmentMapper.selectById(1L)).thenReturn(queued);
             service.update(1L, request(), "u1", false);
@@ -171,14 +142,15 @@ class AppointmentServiceTest {
         }
 
         @Test
-        @DisplayName("电医改自己接的单(处理中) → 成功；已完成单 → 拒绝")
-        void doctorUpdateOwn() {
-            when(appointmentMapper.selectById(2L)).thenReturn(processing);
-            when(appointmentMapper.selectById(3L)).thenReturn(done);
-            service.update(2L, request(), "doc1", false);
-            assertThatThrownBy(() -> service.update(3L, request(), "doc1", false))
+        @DisplayName("已接单（已处理）后本人不可改 → INVALID_STATUS；接单电医也不可改")
+        void lockedAfterAccepted() {
+            when(appointmentMapper.selectById(2L)).thenReturn(accepted);
+            assertThatThrownBy(() -> service.update(2L, request(), "u1", false))
                     .isInstanceOfSatisfying(BizException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_STATUS));
+            assertThatThrownBy(() -> service.update(2L, request(), "doc1", false))
+                    .isInstanceOfSatisfying(BizException.class,
+                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.APPOINTMENT_OWNERSHIP));
         }
 
         @Test
@@ -194,16 +166,16 @@ class AppointmentServiceTest {
     class Delete {
 
         @Test
-        @DisplayName("本人删未接单单 → 成功")
+        @DisplayName("本人删待处理且未接单的单 → 成功")
         void ownerDeleteQueued() {
             when(appointmentMapper.selectById(1L)).thenReturn(queued);
             service.delete(1L, "u1", false, false);
         }
 
         @Test
-        @DisplayName("本人删已接单单 → INVALID_STATUS（本人但状态不允许）；管理员可删")
-        void ownerDeleteProcessing() {
-            when(appointmentMapper.selectById(2L)).thenReturn(processing);
+        @DisplayName("本人删已接单的单 → INVALID_STATUS；管理员可删")
+        void ownerDeleteAccepted() {
+            when(appointmentMapper.selectById(2L)).thenReturn(accepted);
             assertThatThrownBy(() -> service.delete(2L, "u1", false, false))
                     .isInstanceOfSatisfying(BizException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_STATUS));
@@ -211,9 +183,9 @@ class AppointmentServiceTest {
         }
 
         @Test
-        @DisplayName("电医删自己接的单 → 成功；电医删他人单 → APPOINTMENT_OWNERSHIP（走查建议 #3）")
+        @DisplayName("电医删自己接的单 → 成功；电医删他人单 → APPOINTMENT_OWNERSHIP")
         void doctorDeleteOwn() {
-            when(appointmentMapper.selectById(2L)).thenReturn(processing);
+            when(appointmentMapper.selectById(2L)).thenReturn(accepted);
             service.delete(2L, "doc1", false, true);
             assertThatThrownBy(() -> service.delete(2L, "doc2", false, true))
                     .isInstanceOfSatisfying(BizException.class,
@@ -236,7 +208,7 @@ class AppointmentServiceTest {
         }
 
         @Test
-        @DisplayName("提交成功状态为排队")
+        @DisplayName("提交成功状态为待处理")
         void submitOk() {
             // insert 后回填自增 id（模拟 MyBatis-Plus 行为），detail 回查能命中
             org.mockito.Mockito.doAnswer(inv -> {
@@ -258,39 +230,38 @@ class AppointmentServiceTest {
     class AdminSetStatus {
 
         @Test
-        @DisplayName("改成处理中但既无现有电医也没传 → INVALID_PARAM")
-        void toProcessingWithoutDoctor() {
-            when(appointmentMapper.selectById(1L)).thenReturn(queued);   // 排队单，doctorId 为 null
-            assertThatThrownBy(() -> service.adminSetStatus(1L, Appointment.STATUS_PROCESSING, null))
+        @DisplayName("只接受 0/2：传 1 → INVALID_PARAM 且不落库")
+        void rejectProcessingStatus() {
+            assertThatThrownBy(() -> service.adminSetStatus(1L, 1, "doc1"))
                     .isInstanceOfSatisfying(BizException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_PARAM));
             verify(appointmentMapper, never()).update(any(), any());
         }
 
         @Test
-        @DisplayName("指派的账号不是电医（普通用户/不存在）→ INVALID_PARAM")
-        void toProcessingNotADoctor() {
+        @DisplayName("补登记的电医不是电医（普通用户/不存在）→ INVALID_PARAM")
+        void toDoneNotADoctor() {
             when(appointmentMapper.selectById(1L)).thenReturn(queued);
             when(userMapper.selectById("nobody")).thenReturn(null);
-            assertThatThrownBy(() -> service.adminSetStatus(1L, Appointment.STATUS_PROCESSING, "u1"))
+            assertThatThrownBy(() -> service.adminSetStatus(1L, Appointment.STATUS_DONE, "u1"))
                     .isInstanceOfSatisfying(BizException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_PARAM));
-            assertThatThrownBy(() -> service.adminSetStatus(1L, Appointment.STATUS_PROCESSING, "nobody"))
+            assertThatThrownBy(() -> service.adminSetStatus(1L, Appointment.STATUS_DONE, "nobody"))
                     .isInstanceOfSatisfying(BizException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_PARAM));
             verify(appointmentMapper, never()).update(any(), any());
         }
 
         @Test
-        @DisplayName("排队单派单 0→1：写入电医与接单时间")
-        void toProcessingOk() {
+        @DisplayName("待处理单标记已处理并补登记电医：写入电医、接单时间与完成时间")
+        void toDoneOk() {
             when(appointmentMapper.selectById(1L)).thenReturn(queued);
             when(appointmentMapper.update(any(), any())).thenReturn(1);
-            when(appointmentMapper.selectById(1L)).thenReturn(processing);
+            when(appointmentMapper.selectById(1L)).thenReturn(accepted);
 
-            var view = service.adminSetStatus(1L, Appointment.STATUS_PROCESSING, "doc1");
+            var view = service.adminSetStatus(1L, Appointment.STATUS_DONE, "doc1");
 
-            assertThat(view.status()).isEqualTo(Appointment.STATUS_PROCESSING);
+            assertThat(view.status()).isEqualTo(Appointment.STATUS_DONE);
             assertThat(view.doctorId()).isEqualTo("doc1");
             String sqlSet = captureUpdateSet();
             assertThat(sqlSet).contains("doctor_id").contains("appointment_time").contains("done_time");
@@ -299,18 +270,19 @@ class AppointmentServiceTest {
         @Test
         @DisplayName("同状态重复提交：接单电医未变则不覆盖接单时间")
         void sameStatusKeepsAppointmentTime() {
-            processing.setAppointmentTime(java.time.LocalDateTime.now());   // 已有接单时间，不该被刷新
-            when(appointmentMapper.selectById(2L)).thenReturn(processing);  // 已是处理中，doc1 接单
+            accepted.setAppointmentTime(java.time.LocalDateTime.now());   // 已有接单时间，不该被刷新
+            accepted.setDoneTime(null);
+            when(appointmentMapper.selectById(2L)).thenReturn(accepted);
             when(appointmentMapper.update(any(), any())).thenReturn(1);
 
-            service.adminSetStatus(2L, Appointment.STATUS_PROCESSING, "doc1");
+            service.adminSetStatus(2L, Appointment.STATUS_DONE, "doc1");
 
-            // 只在"换人"或"原本没有接单时间"时才写 appointment_time
+            // 只在"原本没有接单时间"时才写 appointment_time
             assertThat(captureUpdateSet()).doesNotContain("appointment_time");
         }
 
         @Test
-        @DisplayName("退回排队中：清空接单电医与两个时间戳")
+        @DisplayName("退回待处理：清空接单电医与两个时间戳")
         void toQueuedClearsFields() {
             when(appointmentMapper.selectById(3L)).thenReturn(done);
             when(appointmentMapper.update(any(), any())).thenReturn(1);
@@ -324,12 +296,12 @@ class AppointmentServiceTest {
         }
 
         @Test
-        @DisplayName("状态校验：3→2 补完成时间")
+        @DisplayName("待处理→已处理：缺完成时间则补")
         void toDoneFillsDoneTime() {
-            when(appointmentMapper.selectById(2L)).thenReturn(processing);   // doneTime 为 null
+            when(appointmentMapper.selectById(1L)).thenReturn(queued);   // doneTime 为 null
             when(appointmentMapper.update(any(), any())).thenReturn(1);
 
-            service.adminSetStatus(2L, Appointment.STATUS_DONE, null);
+            service.adminSetStatus(1L, Appointment.STATUS_DONE, null);
 
             assertThat(captureUpdateSet()).contains("done_time");
         }
@@ -339,7 +311,7 @@ class AppointmentServiceTest {
         void casConflict() {
             when(appointmentMapper.selectById(1L)).thenReturn(queued);
             when(appointmentMapper.update(any(), any())).thenReturn(0);
-            assertThatThrownBy(() -> service.adminSetStatus(1L, Appointment.STATUS_PROCESSING, "doc1"))
+            assertThatThrownBy(() -> service.adminSetStatus(1L, Appointment.STATUS_DONE, "doc1"))
                     .isInstanceOfSatisfying(BizException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_STATUS));
         }
@@ -352,18 +324,18 @@ class AppointmentServiceTest {
                     .isInstanceOfSatisfying(BizException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.APPOINTMENT_NOT_FOUND));
         }
+    }
 
-        /**
-         * 捕获传给 mapper 的 UPDATE SET 子句（列名以字面量出现，便于断言"写没写这一列"）。
-         * 同时断言第一个入参是 null —— 传了非 null 实体会把它的非空字段合并进 SET 子句。
-         */
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        private String captureUpdateSet() {
-            ArgumentCaptor<LambdaUpdateWrapper> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
-            verify(appointmentMapper, atLeastOnce())
-                    .update(ArgumentMatchers.<Appointment>isNull(), (Wrapper<Appointment>) captor.capture());
-            return captor.getValue().getSqlSet();
-        }
+    /**
+     * 捕获传给 mapper 的 UPDATE SET 子句（列名以字面量出现，便于断言"写没写这一列"）。
+     * 同时断言第一个入参是 null —— 传了非 null 实体会把它的非空字段合并进 SET 子句。
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private String captureUpdateSet() {
+        ArgumentCaptor<LambdaUpdateWrapper> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(appointmentMapper, atLeastOnce())
+                .update(ArgumentMatchers.<Appointment>isNull(), (Wrapper<Appointment>) captor.capture());
+        return captor.getValue().getSqlSet();
     }
 
     private AppointmentUpdateRequest request() {

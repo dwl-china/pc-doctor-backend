@@ -14,7 +14,7 @@ public interface UserMapper extends BaseMapper<User> {
     @Select("""
             SELECT u.user_id, u.user_name, u.sex, u.contact_details, u.user_description,
                    u.user_picture, u.create_time,
-                   COUNT(CASE WHEN a.status >= 1 THEN 1 END) AS accepted_count,
+                   COUNT(CASE WHEN a.doctor_id IS NOT NULL THEN 1 END) AS accepted_count,
                    COUNT(CASE WHEN a.status = 2 THEN 1 END) AS completed_count
             FROM user_table u
             LEFT JOIN appointment_table a ON a.doctor_id = u.user_id

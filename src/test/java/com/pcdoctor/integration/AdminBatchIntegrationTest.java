@@ -160,7 +160,7 @@ class AdminBatchIntegrationTest extends BaseIntegrationTest {
     // ---------- 预约 ----------
 
     @Test
-    @DisplayName("批量改预约状态：缺电医的排队单记 2001，指定电医后成功并落库")
+    @DisplayName("批量改预约状态：status=1 已废弃记 2001，标记已处理并补登记电医成功")
     void batchUpdateAppointmentStatus() throws Exception {
         String admin = adminToken();
         String user = register(nextUserId("bs-u"));
@@ -169,21 +169,22 @@ class AdminBatchIntegrationTest extends BaseIntegrationTest {
         long a1 = submitAppointment(user, "no doctor yet", 1L);
         long a2 = submitAppointment(user, "no doctor yet 2", 1L);
 
-        // 不传电医：排队中的单没有可沿用的电医 → 两条都失败
+        // 「处理中」已删除：整批两条都以 2001 记入失败清单
         String failJson = postBatch("/api/admin/appointments/batch/status", admin,
                 "{\"ids\":[" + a1 + "," + a2 + "],\"status\":1}", 0);
         assertThat(objectMapper.readTree(failJson).at("/data/success").asLong()).isZero();
         assertThat(objectMapper.readTree(failJson).at("/data/failures/0/code").asInt()).isEqualTo(2001);
 
-        // 指定电医：两条都成功
+        // 标记已处理并指定电医：两条都成功
         String okJson = postBatch("/api/admin/appointments/batch/status", admin,
-                "{\"ids\":[" + a1 + "," + a2 + "],\"status\":1,\"doctor_id\":\"" + userIdOf(doctor) + "\"}", 0);
+                "{\"ids\":[" + a1 + "," + a2 + "],\"status\":2,\"doctor_id\":\"" + userIdOf(doctor) + "\"}", 0);
         assertThat(objectMapper.readTree(okJson).at("/data/success").asLong()).isEqualTo(2);
 
         Appointment db = appointmentMapper.selectById(a1);
-        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_PROCESSING);
+        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_DONE);
         assertThat(db.getDoctorId()).isEqualTo(userIdOf(doctor));
         assertThat(db.getAppointmentTime()).isNotNull();
+        assertThat(db.getDoneTime()).isNotNull();
     }
 
     @Test

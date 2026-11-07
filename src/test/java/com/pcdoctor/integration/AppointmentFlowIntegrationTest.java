@@ -18,6 +18,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 预约闭环与权限（#5.2、#9、#6.2）。
+ *
+ * <p>2026-11 起只有两态：0 待处理 / 2 已处理；接单即完成，电医与管理员都可接单。
  */
 class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
 
@@ -26,7 +28,7 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
     AppointmentMapper appointmentMapper;
 
     @Test
-    @DisplayName("全流程：提交→接单→完成→留言，状态机与时间戳正确")
+    @DisplayName("全流程：提交→接单（即完成）→留言，状态与时间戳正确")
     void fullFlow() throws Exception {
         String adminToken = adminToken();
         String userToken = register(nextUserId("u"));
@@ -34,17 +36,13 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
         promoteToDoctor(adminToken, userIdOf(doctorToken));
 
         long appt = submitAppointment(userToken, "computer cannot boot", 1L);
-        // 接单
+        // 接单即完成
         mockMvc.perform(post("/api/appointments/" + appt + "/accept")
                         .header("Authorization", "Bearer " + doctorToken))
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.status").value(1))
-                .andExpect(jsonPath("$.data.appointmentTime").isNotEmpty());
-        // 完成
-        mockMvc.perform(post("/api/appointments/" + appt + "/complete")
-                        .header("Authorization", "Bearer " + doctorToken))
-                .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.status").value(2))
+                .andExpect(jsonPath("$.data.doctorId").value(userIdOf(doctorToken)))
+                .andExpect(jsonPath("$.data.appointmentTime").isNotEmpty())
                 .andExpect(jsonPath("$.data.doneTime").isNotEmpty());
         // 留言
         mockMvc.perform(post("/api/appointments/" + appt + "/messages")
@@ -54,6 +52,21 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.data.message").value("is it fixed?"));
         mockMvc.perform(get("/api/appointments/" + appt + "/messages"))
                 .andExpect(jsonPath("$.data[0].userName").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("管理员也可以接单：0→2，接单电医记录为管理员账号")
+    void adminCanAccept() throws Exception {
+        String adminToken = adminToken();
+        String userToken = register(nextUserId("aa"));
+        long appt = submitAppointment(userToken, "admin takes it", 1L);
+
+        mockMvc.perform(post("/api/appointments/" + appt + "/accept")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value(2))
+                .andExpect(jsonPath("$.data.doctorId").value(userIdOf(adminToken)))
+                .andExpect(jsonPath("$.data.doneTime").isNotEmpty());
     }
 
     @Test
@@ -87,14 +100,14 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
         mockMvc.perform(post("/api/appointments/" + appt2 + "/accept")
                 .header("Authorization", "Bearer " + d2));
 
-        mockMvc.perform(get("/api/appointments?status=1&doctor_id=" + userIdOf(d1)))
+        mockMvc.perform(get("/api/appointments?status=2&doctor_id=" + userIdOf(d1)))
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.records.length()").value(1))
                 .andExpect(jsonPath("$.data.records[0].id").value(appt1));
     }
 
     @Test
-    @DisplayName("权限：他人改单 3002、本人改未接单单成功、已接单单不可删（#9）")
+    @DisplayName("权限：他人改单 3002、本人改待处理单成功、被接单后不可删（#9）")
     void ownershipRules() throws Exception {
         String adminToken = adminToken();
         String u1 = register(nextUserId("a"));
@@ -109,7 +122,7 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
                         .contentType("application/json")
                         .content("{\"problem_description\":\"hijack\"}"))
                 .andExpect(jsonPath("$.code").value(3002));
-        // u2 改自己的单 → 成功
+        // u2 改自己的待处理单 → 成功
         mockMvc.perform(put("/api/appointments/" + appt)
                         .header("Authorization", "Bearer " + u2)
                         .contentType("application/json")
@@ -140,7 +153,7 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("回归（走查 bug#1）：有留言的排队预约，本人撤销成功，留言一并清除")
+    @DisplayName("回归（走查 bug#1）：有留言的待处理预约，本人撤销成功，留言一并清除")
     void deleteWithMessages() throws Exception {
         String u = register(nextUserId("dm"));
         long appt = submitAppointment(u, "has messages", 1L);
@@ -194,8 +207,8 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
     // ------------------------------------------------------------------
 
     @Test
-    @DisplayName("管理员派单：排队单 0→1，写入电医与接单时间")
-    void adminAssignDoctorOnQueued() throws Exception {
+    @DisplayName("管理员标记已处理并补登记电医：写入电医、接单与完成时间")
+    void adminMarkDoneWithDoctor() throws Exception {
         String adminToken = adminToken();
         String u = register(nextUserId("au"));
         String d = register(nextUserId("ad"));
@@ -205,21 +218,44 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
         mockMvc.perform(put("/api/admin/appointments/" + appt + "/status")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType("application/json")
-                        .content("{\"status\":1,\"doctor_id\":\"" + userIdOf(d) + "\"}"))
+                        .content("{\"status\":2,\"doctor_id\":\"" + userIdOf(d) + "\"}"))
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.status").value(1))
+                .andExpect(jsonPath("$.data.status").value(2))
                 .andExpect(jsonPath("$.data.doctorId").value(userIdOf(d)))
-                .andExpect(jsonPath("$.data.appointmentTime").isNotEmpty());
+                .andExpect(jsonPath("$.data.appointmentTime").isNotEmpty())
+                .andExpect(jsonPath("$.data.doneTime").isNotEmpty());
 
         Appointment db = appointmentMapper.selectById(appt);
-        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_PROCESSING);
+        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_DONE);
         assertThat(db.getDoctorId()).isEqualTo(userIdOf(d));
         assertThat(db.getAppointmentTime()).isNotNull();
-        assertThat(db.getDoneTime()).isNull();
+        assertThat(db.getDoneTime()).isNotNull();
     }
 
     @Test
-    @DisplayName("管理员退回排队：接单电医与两个时间戳三列全部清空，且其他电医可重新接单")
+    @DisplayName("管理员标记已处理：不补电医也可完成")
+    void adminMarkDoneWithoutDoctor() throws Exception {
+        String adminToken = adminToken();
+        String u = register(nextUserId("nd"));
+        long appt = submitAppointment(u, "no doctor", 1L);
+
+        mockMvc.perform(put("/api/admin/appointments/" + appt + "/status")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json")
+                        .content("{\"status\":2}"))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value(2))
+                .andExpect(jsonPath("$.data.doctorId").doesNotExist())
+                .andExpect(jsonPath("$.data.doneTime").isNotEmpty());
+
+        Appointment db = appointmentMapper.selectById(appt);
+        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_DONE);
+        assertThat(db.getDoctorId()).isNull();
+        assertThat(db.getDoneTime()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("管理员退回待处理：接单电医与两个时间戳三列全部清空，且其他电医可重新接单")
     void adminRevertToQueuedClearsAll() throws Exception {
         String adminToken = adminToken();
         String u = register(nextUserId("ru"));
@@ -249,63 +285,32 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
         assertThat(db.getAppointmentTime()).isNull();
         assertThat(db.getDoneTime()).isNull();
 
-        // 行为证明：确实回到了排队，另一个电医能接走
+        // 行为证明：确实回到了待处理，另一个电医能接走
         mockMvc.perform(post("/api/appointments/" + appt + "/accept")
                         .header("Authorization", "Bearer " + d2))
                 .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value(2))
                 .andExpect(jsonPath("$.data.doctorId").value(userIdOf(d2)));
     }
 
     @Test
-    @DisplayName("管理员完成：1→2 补完成时间，接单电医不变")
-    void adminCompleteForOtherDoctor() throws Exception {
-        String adminToken = adminToken();
-        String u = register(nextUserId("cu"));
-        String d = register(nextUserId("cd"));
-        promoteToDoctor(adminToken, userIdOf(d));
-        long appt = submitAppointment(u, "complete me", 1L);
-        mockMvc.perform(post("/api/appointments/" + appt + "/accept")
-                .header("Authorization", "Bearer " + d));
-        Appointment before = appointmentMapper.selectById(appt);
-
-        mockMvc.perform(put("/api/admin/appointments/" + appt + "/status")
-                        .header("Authorization", "Bearer " + adminToken)
-                        .contentType("application/json")
-                        .content("{\"status\":2}"))
-                .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.status").value(2))
-                .andExpect(jsonPath("$.data.doneTime").isNotEmpty());
-
-        Appointment db = appointmentMapper.selectById(appt);
-        assertThat(db.getDoneTime()).isNotNull();
-        assertThat(db.getDoctorId()).isEqualTo(userIdOf(d));
-        assertThat(db.getAppointmentTime()).isEqualTo(before.getAppointmentTime());
-    }
-
-    @Test
-    @DisplayName("管理员把已完成退回处理中：清空完成时间，接单信息保留")
-    void adminProcessFromDoneClearsDoneTime() throws Exception {
+    @DisplayName("管理员改状态：不再接受「处理中」1 → 2001 且库中数据不变")
+    void adminRejectProcessingStatus() throws Exception {
         String adminToken = adminToken();
         String u = register(nextUserId("pu"));
         String d = register(nextUserId("pd"));
         promoteToDoctor(adminToken, userIdOf(d));
-        long appt = submitAppointment(u, "reopen me", 1L);
-        mockMvc.perform(post("/api/appointments/" + appt + "/accept")
-                .header("Authorization", "Bearer " + d));
-        mockMvc.perform(post("/api/appointments/" + appt + "/complete")
-                .header("Authorization", "Bearer " + d));
-        assertThat(appointmentMapper.selectById(appt).getDoneTime()).isNotNull();
+        long appt = submitAppointment(u, "no processing", 1L);
 
         mockMvc.perform(put("/api/admin/appointments/" + appt + "/status")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType("application/json")
-                        .content("{\"status\":1}"))
-                .andExpect(jsonPath("$.code").value(0));
+                        .content("{\"status\":1,\"doctor_id\":\"" + userIdOf(d) + "\"}"))
+                .andExpect(jsonPath("$.code").value(2001));
 
         Appointment db = appointmentMapper.selectById(appt);
-        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_PROCESSING);
-        assertThat(db.getDoneTime()).isNull();
-        assertThat(db.getDoctorId()).isEqualTo(userIdOf(d));
+        assertThat(db.getStatus()).isEqualTo(Appointment.STATUS_QUEUED);
+        assertThat(db.getDoctorId()).isNull();
     }
 
     @Test
@@ -319,7 +324,7 @@ class AppointmentFlowIntegrationTest extends BaseIntegrationTest {
         mockMvc.perform(put("/api/admin/appointments/" + appt + "/status")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType("application/json")
-                        .content("{\"status\":1,\"doctor_id\":\"" + userIdOf(plain) + "\"}"))
+                        .content("{\"status\":2,\"doctor_id\":\"" + userIdOf(plain) + "\"}"))
                 .andExpect(jsonPath("$.code").value(2001));
 
         Appointment db = appointmentMapper.selectById(appt);

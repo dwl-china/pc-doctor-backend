@@ -15,7 +15,6 @@ import java.time.LocalDateTime;
 public class Appointment {
 
     public static final int STATUS_QUEUED = 0;
-    public static final int STATUS_PROCESSING = 1;
     public static final int STATUS_DONE = 2;
 
     @TableId(type = IdType.AUTO)
@@ -35,18 +34,18 @@ public class Appointment {
 
     private String appointmentLocation;
 
-    /** 0=排队 1=处理中 2=已完成 */
+    /** 0=待处理 2=已处理（接单即处理完成，不再有中间状态） */
     private Integer status;
 
-    /** 接单电医 */
+    /** 接单电医（管理员接单时也可能是管理员账号） */
     private String doctorId;
 
     private LocalDateTime createTime;
 
-    /** 接单时间（0→1 时写入） */
+    /** 接单时间（接单即完成，与 doneTime 同时写入） */
     private LocalDateTime appointmentTime;
 
-    /** 完成时间（1→2 时写入） */
+    /** 处理完成时间 */
     private LocalDateTime doneTime;
 
     private LocalDateTime updateTime;

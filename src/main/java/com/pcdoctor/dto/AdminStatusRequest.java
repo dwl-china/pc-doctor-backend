@@ -15,11 +15,11 @@ import jakarta.validation.constraints.Size;
 public record AdminStatusRequest(
         @JsonProperty("status")
         @NotNull(message = "请选择目标状态")
-        @Min(value = 0, message = "状态取值为 0/1/2")
-        @Max(value = 2, message = "状态取值为 0/1/2")
+        @Min(value = 0, message = "状态取值为 0/2")
+        @Max(value = 2, message = "状态取值为 0/2")
         Integer status,
 
-        /** 目标状态为「处理中」时必填；「已完成」时可选（用于补登记接单电医）；「排队中」忽略 */
+        /** 目标状态为「已处理」时可选（用于补登记接单电医）；「待处理」忽略 */
         @JsonProperty("doctor_id")
         @Size(max = 50, message = "电医账号过长")
         String doctorId) {

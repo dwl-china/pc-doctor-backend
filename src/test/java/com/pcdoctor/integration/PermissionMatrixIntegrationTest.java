@@ -43,9 +43,10 @@ class PermissionMatrixIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("接单：未登录 401 / 用户 403 / 电医 200 / 管理员 403")
+    @DisplayName("接单：未登录 401 / 用户 403 / 电医 200 / 管理员 200")
     void acceptMatrix() throws Exception {
         prepareRoles();
+        long adminAppt = submitAppointment(userToken, "matrix admin accept", 1L);
         mockMvc.perform(post("/api/appointments/" + appt + "/accept")).andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/appointments/" + appt + "/accept")
                         .header("Authorization", "Bearer " + userToken))
@@ -53,9 +54,11 @@ class PermissionMatrixIntegrationTest extends BaseIntegrationTest {
         mockMvc.perform(post("/api/appointments/" + appt + "/accept")
                         .header("Authorization", "Bearer " + doctorToken))
                 .andExpect(jsonPath("$.code").value(0));
-        mockMvc.perform(post("/api/appointments/" + appt + "/accept")
+        // 管理员也可以接单（接单即完成）
+        mockMvc.perform(post("/api/appointments/" + adminAppt + "/accept")
                         .header("Authorization", "Bearer " + adminToken))
-                .andExpect(status().isForbidden());
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value(2));
     }
 
     @Test
@@ -135,13 +138,13 @@ class PermissionMatrixIntegrationTest extends BaseIntegrationTest {
     void adminAppointmentStatusMatrix() throws Exception {
         prepareRoles();
         String url = "/api/admin/appointments/" + appt + "/status";
-        String body = "{\"status\":1,\"doctor_id\":\"" + userIdOf(doctorToken) + "\"}";
+        String body = "{\"status\":2,\"doctor_id\":\"" + userIdOf(doctorToken) + "\"}";
         mockMvc.perform(put(url).contentType("application/json").content(body))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(put(url).header("Authorization", "Bearer " + userToken)
                         .contentType("application/json").content(body))
                 .andExpect(status().isForbidden());
-        // 电医不能走管理员通道改状态（他自己的入口是 accept/complete）
+        // 电医不能走管理员通道改状态（他自己的入口是 accept）
         mockMvc.perform(put(url).header("Authorization", "Bearer " + doctorToken)
                         .contentType("application/json").content(body))
                 .andExpect(status().isForbidden());

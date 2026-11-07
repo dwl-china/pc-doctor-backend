@@ -15,8 +15,8 @@ import java.util.List;
  * <p>{@code status} 必须 {@code @NotNull}：{@code AppointmentService.adminSetStatus} 内部对 status
  * 拆箱比较，传 null 会 NPE → 500（单条路径靠 {@code AdminStatusRequest} 的同名约束兜住，这里照抄）。
  *
- * <p>{@code doctor_id} 作用于整批：{@code status=1} 时不传则逐条沿用各自原有电医，
- * 排队中的单（原本没有电医）会以 2001 记入失败清单。
+ * <p>{@code doctor_id} 作用于整批：{@code status=2} 时可选，用于补登记接单电医；
+ * {@code status=0} 时忽略（回到待处理会清空接单信息）。
  */
 public record BatchStatusRequest(
         @NotEmpty(message = "请选择至少一项")
@@ -24,8 +24,8 @@ public record BatchStatusRequest(
         List<@NotNull(message = "id 不能为空") Long> ids,
 
         @NotNull(message = "请选择目标状态")
-        @Min(value = 0, message = "状态取值为 0/1/2")
-        @Max(value = 2, message = "状态取值为 0/1/2")
+        @Min(value = 0, message = "状态取值为 0/2")
+        @Max(value = 2, message = "状态取值为 0/2")
         Integer status,
 
         @JsonProperty("doctor_id")

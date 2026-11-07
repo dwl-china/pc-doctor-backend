@@ -82,18 +82,11 @@ public class AppointmentController {
         return Result.ok();
     }
 
-    /** 接单（电医）：0→1 */
+    /** 接单（电医/管理员）：0→2，接单即完成 */
     @PostMapping("/{id}/accept")
-    @PreAuthorize("hasRole('DOCTOR')")
+    @PreAuthorize("hasAnyRole('DOCTOR','ADMIN')")
     public Result<AppointmentView> accept(@PathVariable Long id, Authentication authentication) {
         return Result.ok(appointmentService.accept(id, authentication.getName()));
-    }
-
-    /** 完成（电医，仅接单者本人）：1→2 */
-    @PostMapping("/{id}/complete")
-    @PreAuthorize("hasRole('DOCTOR')")
-    public Result<AppointmentView> complete(@PathVariable Long id, Authentication authentication) {
-        return Result.ok(appointmentService.complete(id, authentication.getName()));
     }
 
     private boolean isAdmin(Authentication authentication) {
